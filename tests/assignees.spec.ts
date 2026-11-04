@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { Store } from '../src/app/store.ts'
 import { KV } from '../src/kv.ts'
-import { DEFAULT_CONFIG, loadConfig, readShadow, recordShadow, suggest, type AssigneesConfig } from '../src/app/assignees.ts'
+import { DEFAULT_CONFIG, SHADOW_KEEP, loadConfig, readShadow, recordShadow, suggest, type AssigneesConfig } from '../src/app/assignees.ts'
 import { agentAllows } from '../src/executor/dsh.ts'
 import { feishu, startRuntime } from './fixtures/host.ts'
 
@@ -206,6 +206,32 @@ it('records enabled=true and still writes the suggestion', () => {
   expect(record.suggestion.assignee).toBe('ui')
   // Both fields survive the round trip through the store.
   expect(readShadow(store, 'decision-enabled')).toEqual(record)
+})
+
+it('prunes the oldest shadow records, keeping the most recent SHADOW_KEEP', () => {
+  const store = new Store(join(directory, 'orchestrator.sqlite'))
+  store.set(KV.assignees.config, config([agent('default-worker')]))
+  // Write past the cap with distinct, increasing timestamps.
+  for (let i = 0; i < SHADOW_KEEP + 5; i++) {
+    recordShadow(store, { decisionId: `d-${i}`, workType: 'docs', now: new Date(Date.UTC(2026, 0, 1, 0, 0, i)) })
+  }
+  const keys = store.keys('assignees-shadow:')
+  expect(keys).toHaveLength(SHADOW_KEEP)
+  // The newest survive, the oldest are gone.
+  expect(readShadow(store, `d-${SHADOW_KEEP + 4}`)).toMatchObject({ decisionId: `d-${SHADOW_KEEP + 4}` })
+  expect(readShadow(store, 'd-0')).toBeUndefined()
+  // The record just written is always among the kept, so a read of it is never interrupted by the prune.
+  expect(readShadow(store, `d-${SHADOW_KEEP + 4}`)).toBeDefined()
+})
+
+it('leaves the shadow records alone while under the cap', () => {
+  const store = new Store(join(directory, 'orchestrator.sqlite'))
+  store.set(KV.assignees.config, config([agent('default-worker')]))
+  recordShadow(store, { decisionId: 'first', workType: 'docs', now: new Date('2026-11-04T00:00:00.000Z') })
+  recordShadow(store, { decisionId: 'second', workType: 'docs', now: new Date('2026-11-04T00:00:01.000Z') })
+  expect(store.keys('assignees-shadow:')).toHaveLength(2)
+  expect(readShadow(store, 'first')).toBeDefined()
+  expect(readShadow(store, 'second')).toBeDefined()
 })
 
 it('records the work type through the route tool and leaves the ticket unchanged', async () => {

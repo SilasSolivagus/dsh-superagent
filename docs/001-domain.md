@@ -40,6 +40,8 @@ A person is not a domain concept. A Trigger carries its actor's identifier as th
 
 The Executor, with its Sessions and directories, is outside the domain and connects through Assignments.
 
+Assignee is deployment configuration, not domain state. Which executor a Ticket would route to comes from a roster the deployment keeps in its own KV record, `assignees:v1`; it is neither a settings block nor a field on a Ticket. The domain keeps only the runtime fact of who executes a Ticket, which an Assignment records. The split is deliberate: `SettingsSchema` is strict, so a build that added a field there would make an older build fail to parse the settings it reads at startup, while `ticket.value` and `decision.value` are raw JSON, so a runtime field can be added there freely.
+
 Aggregates: a Source holds its read position. A Thread holds its Subscriptions, its running Eval, which runs serially and merges Triggers that arrive meanwhile into the next batch, and its Decision history. A Ticket holds its Assignments, Channels and Inputs, and refers to Decisions by id.
 
 ## Rejected concepts

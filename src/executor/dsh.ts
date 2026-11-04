@@ -197,6 +197,17 @@ export class WorkerSlots {
   }
   /** Releases `ticketId`'s starting slot once its worker session is running or the launch/wake attempt has ended. */
   free(ticketId: string): void { this.starting.delete(ticketId) }
+  /** Whether `ticketId` holds a starting reservation, which counts against its agent's own limit too. */
+  holds(ticketId: string): boolean { return this.starting.has(ticketId) }
+}
+
+/**
+ * Whether the agent a ticket was accepted for still has a free slot. A ticket without an assignee, or one whose agent
+ * the roster no longer holds, is unlimited here: the global worker maximum still applies. `active` counts that agent's
+ * tickets that already hold a slot, running or starting.
+ */
+export function agentAllows(agent: { concurrency: number } | undefined, active: number): boolean {
+  return !agent || active < agent.concurrency
 }
 
 /**
@@ -274,6 +285,13 @@ export class DshExecutor implements Executor {
     const ticket = this.host.store.tickets.get(ticketId)
     const assignment = ticket && latestAssignment(ticket)
     if (!ticket || !liveTicket(ticket) || assignment?.id !== assignmentId || assignment.state !== 'pending') return
+    // The roster's own limit applies before the global one: a full agent defers its ticket instead of taking a slot.
+    const assigned = assignedAgent(this.host.store, ticket.execution?.assignee)
+    if (assigned) {
+      const busy = this.host.store.tickets.open().filter(item => item.id !== ticketId
+        && item.execution?.assignee === assigned.id && (this.running(item) || this.slots.holds(item.id))).length
+      if (!agentAllows(assigned, busy)) throw new Later(`The ${assigned.id} agent already holds ${assigned.concurrency} ticket(s)`)
+    }
     this.slots.reserve(ticketId, 'launch')
     try { await this.launch(ticket, assignment); this.transient.delete(`launch:${assignmentId}`) }
     catch (error) {

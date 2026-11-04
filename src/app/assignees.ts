@@ -44,6 +44,9 @@ export const DEFAULT_CONFIG: AssigneesConfig = {
   agents: [{ id: 'default-worker', preset: 'dsh-superagent-worker', model: null, skills: ['*'], scopes: ['*'], concurrency: 2, cost: 'mid' }],
 }
 
+/** A fresh copy of the default, so a caller editing what it read cannot change later reads. */
+const defaultConfig = (): AssigneesConfig => structuredClone(DEFAULT_CONFIG)
+
 /** Why `suggest` did not pick a specialist; a fallback always names `default-worker`. */
 export type Fallback = 'single' | 'noCapability' | 'lowConfidence' | 'handedBack'
 
@@ -68,10 +71,10 @@ export interface ShadowRecord {
 /** Read the stored configuration, falling back to the single default agent when it is absent or unreadable. */
 export function loadConfig(store: Pick<Store, 'get'>): { config: AssigneesConfig; error?: string } {
   const stored = store.get(KV.assignees.config)
-  if (stored === undefined) return { config: DEFAULT_CONFIG }
+  if (stored === undefined) return { config: defaultConfig() }
   const parsed = AssigneesConfigSchema.safeParse(stored)
   // A broken configuration must not block startup: keep today's behaviour and report why.
-  if (!parsed.success) return { config: DEFAULT_CONFIG, error: parsed.error.issues[0]?.message ?? 'invalid' }
+  if (!parsed.success) return { config: defaultConfig(), error: parsed.error.issues[0]?.message ?? 'invalid' }
   return { config: parsed.data }
 }
 

@@ -174,8 +174,8 @@ it('refuses alone an item that lacks a field its kind needs or breaks a field\'s
     { ...accept, trigger_id: b, worktree_name: 'one-two-three-four-five' },
     { ...accept, trigger_id: c, worktree_name: 'fix-c', note: words(NOTE_WORDS + 1) },
     { ...accept, trigger_id: d, worktree_name: 'fix-d', title: '' },
-    // Fields of another kind, null or not, are left unread.
-    { kind: 'ignore', trigger_id: e, reason: 'chat', ticket_id: null, title: null, note: null },
+    // Fields of another kind, null or not, are left unread; a work_type carrying a value is the exception, refused rather than dropped.
+    { kind: 'ignore', trigger_id: e, reason: 'chat', ticket_id: null, title: null, note: null, work_type: null },
   ] }) as { results: Record<string, unknown>[] }
   expect(results).toEqual([
     { trigger_id: a, kind: 'accept', refused: 'accept needs worktree_name' },
@@ -185,6 +185,34 @@ it('refuses alone an item that lacks a field its kind needs or breaks a field\'s
     { trigger_id: e, kind: 'ignore', decision: 'ignore', reason: 'chat' },
   ])
   expect(h.runtime.store.tickets.list()).toEqual([])
+})
+
+it('refuses a work_type on a kind that does not read it instead of dropping the value', async () => {
+  const { ticket } = await h.acceptedTicket(feishu('1', '@bot 修一下回归'))
+  const other = feishu('2', '@bot 顺便看看这个'), chatter = feishu('3', '@bot 谢谢'), request = feishu('4', '@bot 不用修了')
+  for (const trigger of [other, chatter, request]) h.runtime.receive(trigger)
+  await h.runtime.idle()
+  const refused = 'work_type is only read by accept; remove it'
+  const { results } = await h.runTool(h.runtime.masterId, 'orchestrator_route', { decisions: [
+    { kind: 'attach', ticket_id: ticket.id, trigger_id: other.id, work_type: 'bugfix' },
+    { kind: 'ignore', trigger_id: chatter.id, reason: 'thanks', work_type: 'docs' },
+    { kind: 'stop', ticket_id: ticket.id, trigger_id: request.id, reason: 'Not needed', work_type: 'other' },
+  ] }) as { results: Record<string, unknown>[] }
+  expect(results).toEqual([
+    { trigger_id: other.id, kind: 'attach', refused },
+    { trigger_id: chatter.id, kind: 'ignore', refused },
+    { trigger_id: request.id, kind: 'stop', refused },
+  ])
+  // A refusal records nothing, so the same triggers can be routed again without the field.
+  expect(h.runtime.store.tickets.get(ticket.id)!.ended).toBeUndefined()
+  const retried = await h.runTool(h.runtime.masterId, 'orchestrator_route', { decisions: [
+    { kind: 'attach', ticket_id: ticket.id, trigger_id: other.id },
+    { kind: 'ignore', trigger_id: chatter.id, reason: 'thanks' },
+  ] }) as { results: Record<string, unknown>[] }
+  expect(retried.results).toEqual([
+    { trigger_id: other.id, kind: 'attach', reason: expect.any(String), ticket: expect.objectContaining({ ticket_id: ticket.id }) },
+    { trigger_id: chatter.id, kind: 'ignore', decision: 'ignore', reason: 'thanks' },
+  ])
 })
 
 it('decides a candidate\'s batch with its card\'s trigger: a second accept keeps the first, and no other decision contradicts it', async () => {

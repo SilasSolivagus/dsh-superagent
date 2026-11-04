@@ -18,13 +18,63 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        id: pnpm
+        uses: pnpm/action-setup@v4
         with:
           version: 11.7.0
-      - uses: actions/setup-node@v4
+      - name: Setup Node
+        id: node
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm check
+      - name: Install dependencies
+        id: install
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        id: typecheck
+        run: pnpm typecheck
+      - name: Tests
+        id: test
+        run: pnpm test
+      - name: Build
+        id: build
+        run: pnpm build
+      - name: Failure summary
+        if: failure()
+        env:
+          CHECKOUT: ${{ steps.checkout.outcome }}
+          PNPM_SETUP: ${{ steps.pnpm.outcome }}
+          NODE_SETUP: ${{ steps.node.outcome }}
+          INSTALL: ${{ steps.install.outcome }}
+          TYPECHECK: ${{ steps.typecheck.outcome }}
+          TEST: ${{ steps.test.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+        run: |
+          set -euo pipefail
+          failed=""
+          for entry in \
+            "Checkout:$CHECKOUT" \
+            "Setup pnpm:$PNPM_SETUP" \
+            "Setup Node:$NODE_SETUP" \
+            "Install dependencies:$INSTALL" \
+            "Typecheck:$TYPECHECK" \
+            "Tests:$TEST" \
+            "Build:$BUILD"; do
+            step_name=${entry%:*}
+            outcome=${entry##*:}
+            if [ "$outcome" = "failure" ]; then
+              failed="${failed:+$failed, }$step_name"
+            fi
+          done
+          failed=${failed:-unknown}
+          {
+            echo "### CI failed"
+            echo
+            echo "Failed step: **$failed**"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error title=CI failed::Failed step: $failed"

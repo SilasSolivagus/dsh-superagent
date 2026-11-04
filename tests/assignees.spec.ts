@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest'
 import { Store } from '../src/app/store.ts'
 import { KV } from '../src/kv.ts'
 import { DEFAULT_CONFIG, loadConfig, readShadow, recordShadow, suggest, type AssigneesConfig } from '../src/app/assignees.ts'
+import { agentAllows } from '../src/executor/dsh.ts'
 import { feishu, startRuntime } from './fixtures/host.ts'
 
 let directory: string
@@ -246,4 +247,37 @@ it('judges a repository-scoped roster against the repository the work is in', ()
   // The same work in another repository leaves the scoped post ineligible, so the wildcard covers it.
   const outside = recordShadow(store, { decisionId: 'd-out', workType: 'docs', repo: 'acme/other' })
   expect(outside.suggestion).toMatchObject({ assignee: 'default-worker', fallback: 'single' })
+})
+
+it('names the picked agent on the ticket when routing is enabled, and leaves it unnamed otherwise', async () => {
+  const h = await startRuntime()
+  try {
+    const roster = { version: 1, enabled: true, agents: [agent('default-worker'), agent('docs-scribe', { skills: ['docs'], scopes: ['*'] })] }
+    h.runtime.store.set(KV.assignees.config, roster)
+    const first = feishu('21', '@bot README 补一句用途说明')
+    h.runtime.receive(first); await h.runtime.idle()
+    await h.runTool(h.runtime.masterId, 'orchestrator_route', { decisions: [{ kind: 'accept', trigger_id: first.id,
+      title: 'README 补一句', worktree_name: 'readme-note', acknowledgement: '补一句用途说明', work_type: 'docs' }] })
+    // P1: the specialist the suggestion names is written onto the ticket, so launch starts that agent's worker.
+    const routed = h.runtime.store.tickets.open().find(ticket => ticket.title === 'README 补一句')!
+    expect(routed.execution?.assignee).toBe('docs-scribe')
+
+    // With routing off the same work is accepted exactly as before: no assignee on the record.
+    h.runtime.store.set(KV.assignees.config, { ...roster, enabled: false })
+    const second = feishu('22', '@bot README 再补一句')
+    h.runtime.receive(second); await h.runtime.idle()
+    await h.runTool(h.runtime.masterId, 'orchestrator_route', { decisions: [{ kind: 'accept', trigger_id: second.id,
+      title: 'README 再补一句', worktree_name: 'readme-note-2', acknowledgement: '再补一句', work_type: 'docs' }] })
+    const plain = h.runtime.store.tickets.open().find(ticket => ticket.title === 'README 再补一句')!
+    expect(plain.execution?.assignee).toBeUndefined()
+  } finally { await h.stop() }
+})
+
+it('lets an agent start only as many tickets as its roster entry allows', () => {
+  const roster = { concurrency: 2 }
+  expect(agentAllows(undefined, 5)).toBe(true)      // no roster entry: only the global maximum applies
+  expect(agentAllows(roster, 0)).toBe(true)
+  expect(agentAllows(roster, 1)).toBe(true)
+  expect(agentAllows(roster, 2)).toBe(false)        // its own slot is full, so the launch waits
+  expect(agentAllows(roster, 3)).toBe(false)
 })

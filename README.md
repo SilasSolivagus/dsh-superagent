@@ -20,6 +20,10 @@ It asks one short question at a time, shows the full plan once, and then install
 
 Assignee routing decides which executor a Ticket should go to. Its configuration is not a settings block: it is the JSON record at the KV key `assignees:v1` in the state database (`<stateDir>/orchestrator.sqlite`, table `kv`). The settings schema is strict, so a build that added a routing field to settings would make an older build fail to parse the settings it reads at startup; a record in its own KV key is invisible to a build without the feature, and rolling back needs no migration.
 
+That separation is deliberate. A settings field becomes a contract every older build must parse and every panel form must carry, which suits a value the team settles once, not a roster the prototype is still testing. Kept in its own record with its own `version`, the roster can change shape or disappear between builds and be migrated in code, and the settings blocks stay untouched.
+
+The cost is the panel. A settings block brings a form, validation on save and a revision history; `assignees:v1` has none of them, so changing the roster means writing the record into `kv` directly. A record that fails its schema is discarded silently, so a typo shows up as the fallback to `default-worker` described below, not as a refused save.
+
 ```json
 {
   "version": 1,

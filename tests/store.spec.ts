@@ -262,3 +262,11 @@ it('reads `%` and `_` in a key prefix and a search query as written, not as patt
   expect([store.read.search('50%').map(item => item.id), store.read.search('a_b').map(item => item.id)]).toEqual([['p'], ['r']])
   store.close()
 })
+it('matches `%` and `_` in a key prefix literally, without sweeping in keys they would wildcard-match', () => {
+  const store = new Store(join(directory, 'orchestrator.sqlite'))
+  for (const name of ['a_b:1', 'axb:1', 'a%b:1']) store.set(name, 1)
+  // Unescaped, `a_b:` would also match `axb:1` and `a%b:1` (one `_` matches any single character), and `a%b:` would match all three.
+  expect(store.keys('a_b:')).toEqual(['a_b:1'])
+  expect(store.keys('a%b:')).toEqual(['a%b:1'])
+  store.close()
+})

@@ -6,7 +6,7 @@ import { UserError, followupOwners, key, reasonText, type Decision, type Decisio
   from '../../core/index.ts'
 import { IM_WORDS, NOTE_WORDS, wordCount } from '../../infra/text.ts'
 import { AssessmentSchema, EvalReadSchema, WorktreeNameSchema, type MasterAssessor } from '../assessment.ts'
-import { WORK_TYPES, recordShadow, type WorkType } from '../assignees.ts'
+import { WORK_TYPES, loadConfig, recordShadow, suggest, type WorkType } from '../assignees.ts'
 import { ticketCard } from '../cards.ts'
 import { PromptConfigSchema, savePrompts, type Prompts } from '../prompts.ts'
 import { readResource, type MainResourceHost, type ResourceHost } from '../resources.ts'
@@ -98,18 +98,22 @@ function route(host: MainToolsHost, item: RouteItem, decided: ReadonlyMap<string
   switch (item.kind) {
     case 'accept': {
       const before = host.store.triggers.disposition(item.trigger_id)?.decisionId
+      // The roster is read before the decision so an enabled routing can name the agent in the same write; the shadow
+      // record below repeats the calculation, keeping the audit equal to what was applied.
+      const roster = loadConfig(host.store).config
+      const github = host.store.settings().sources.github?.config as { repository?: string } | undefined
+      const workType = (item.work_type ?? null) as WorkType | null
+      const picked = roster.enabled ? suggest(workType, roster, new Map(), github?.repository).assignee : undefined
       const decision = host.engine.decide(item.trigger_id, { kind: 'accept', title: item.title!, scope: item.title!, reason: { code: 'explicitRouted' },
-        acknowledgement: item.acknowledgement!, name: item.worktree_name!, ...note })
+        acknowledgement: item.acknowledgement!, name: item.worktree_name!, ...(picked ? { assignee: picked } : {}), ...note })
       // A Decision that created no ticket is the item's refusal; one that existed before keeps what it was accepted with.
       if (decision.kind !== 'accept' || !decision.ticketId) return { refused: `Ticket was not created: ${reasonText(decision.reason)}` }
       if (decision.id === before) {
         return { decision: 'accept', reason: `Already accepted as ${decision.ticketId}; title and acknowledgement unchanged`, ticketId: decision.ticketId }
       }
       // Routing is recorded, not applied: `recordShadow` writes what it would have decided and changes nothing.
-      // The roster can be scoped to one repository, so the shadow suggestion is judged against the configured one.
-      const github = host.store.settings().sources.github?.config as { repository?: string } | undefined
       const shadow = recordShadow(host.store, { decisionId: decision.id, ticketId: decision.ticketId,
-        workType: (item.work_type ?? null) as WorkType | null, ...(github?.repository ? { repo: github.repository } : {}) })
+        workType, ...(github?.repository ? { repo: github.repository } : {}) })
       return { ...fromDecision(decision), triggerIds: decision.triggerIds,
         shadow: { assignee: shadow.suggestion.assignee, workType: shadow.workType, ...(shadow.suggestion.fallback ? { fallback: shadow.suggestion.fallback } : {}) } }
     }

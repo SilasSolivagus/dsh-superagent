@@ -9,6 +9,7 @@ import { z } from 'zod'
 import { key, liveTicket, type Ticket } from '../core/index.ts'
 import { mandateInstructions, ticketOfSession } from '../executor/dsh.ts'
 import type { HealthEntry } from '../infra/health.ts'
+import type { RoleModel } from '../policy.ts'
 import { AgentDelivery, messageId } from './delivery.ts'
 import type { Effects } from './effects.ts'
 import type { Variable } from './execution-environment.ts'
@@ -135,19 +136,23 @@ export class Sessions {
     })
   }
   /** Resolves or creates session `id` in workspace `cwd`, initializes its role model, decorates it with prompts/skills/tools, sets `danger-full-access` permissions, and renames it to `title`. */
-  async ensure(id: string, cwd: string, title: string, role: 'orchestrator' | 'worker'): Promise<Agent> {
+  async ensure(id: string, cwd: string, title: string, role: 'orchestrator' | 'worker',
+    options: { preset?: string; model?: RoleModel | null } = {}): Promise<Agent> {
     const ctx = this.ctx
     let result = await ctx.sessionController.resolveAgent(id as SessionId)
     if ('error' in result && result.error.code === 'session/not-found') {
       const workspace = await ctx.workspaceRegistry.create(cwd)
       // A Session keeps the preset it was created with, one of the bundle's own (cordis.patch.yml).
       await ctx.sessionController.create({ sessionId: id as SessionId, workspaceId: workspace.id,
-        agentPreset: role === 'worker' ? WORKER_PRESET : ROUTER_PRESET })
+        agentPreset: options.preset ?? (role === 'worker' ? WORKER_PRESET : ROUTER_PRESET) })
       result = await ctx.sessionController.resolveAgent(id as SessionId)
     }
     if ('error' in result) throw result.error
     const settings = this.host.store.settings()
-    await initializeRoleModel(ctx, result.agent, role === 'orchestrator' ? settings.eval.model : settings.executor.model)
+    // An assignee's model applies to the Session it creates; `undefined` keeps the execution setting, and the preset is
+    // fixed at creation, so an existing Session keeps the one it was made with.
+    await initializeRoleModel(ctx, result.agent, role === 'orchestrator' ? settings.eval.model
+      : options.model === null ? null : options.model ?? settings.executor.model)
     await this.decorate(result.agent)
     ctx.permissionPresets.set(result.agent.session, 'danger-full-access')
     await ctx.sessionController.rename({ sessionId: id as SessionId, title })

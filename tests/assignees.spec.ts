@@ -110,6 +110,7 @@ it('does not let out-of-range history push a weak match past the fallback thresh
   const cfg = config([agent('wild-a', { cost: 'high', concurrency: 16 }), agent('wild-b', { cost: 'high', concurrency: 16 })])
   const load = new Map([['wild-a', 15], ['wild-b', 15]])
   expect(suggest('docs', cfg, load, undefined, () => 5)).toMatchObject({ assignee: 'default-worker', fallback: 'lowConfidence' })
+})
 
 it('scores an explicit skill above the wildcard fallback when an agent lists both', () => {
   // Two wildcard-only agents both score the wildcard fallback.

@@ -47,6 +47,28 @@ The header search finds Triggers by text, id, Feishu message id or a stored link
 
 Search also finds Threads by references such as `#12` or a GitHub URL, and Tickets by title or a matching Thread.
 
+## Known limits
+
+The panel does not show the assignee that routing suggests for a Ticket, and it does not support manual reassignment. An explicit accept writes the suggestion to the state database (`<stateDir>/orchestrator.sqlite`, table `kv`; `<stateDir>` is the state directory under **Settings → Deployment**) as `assignees-shadow:<decisionId>`, and that record is currently the only place to read it.
+
+To read one record:
+
+```sh
+sqlite3 "<stateDir>/orchestrator.sqlite" \
+  "SELECT value FROM kv WHERE key = 'assignees-shadow:<decisionId>';"
+```
+
+The value is JSON with `at`, `decisionId`, `ticketId`, `workType`, `suggestion` (`assignee`, `score`, `evidence` and an optional `fallback`) and `enabled`. To list recent records when the Decision ID is not at hand:
+
+```sh
+sqlite3 "<stateDir>/orchestrator.sqlite" \
+  "SELECT key, json_extract(value, '$.suggestion.assignee') AS assignee, value
+     FROM kv WHERE key LIKE 'assignees-shadow:%'
+    ORDER BY json_extract(value, '$.at') DESC LIMIT 20;"
+```
+
+Showing the suggestion in the panel and supporting manual reassignment are planned work, not a defect.
+
 ## Principles
 
 1. **Focus on what matters.** Every element answers one of the three questions, or it is removed. A number appears only when it changes what the supervisor does.

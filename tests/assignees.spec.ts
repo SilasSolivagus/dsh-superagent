@@ -185,6 +185,18 @@ it('respects repository scopes', () => {
   expect(suggest('infra', cfg, new Map(), 'other/repo')).toEqual({ assignee: 'default-worker', score: 0, evidence: ['only:default-worker'], fallback: 'single' })
 })
 
+it('matches repository scopes regardless of letter case', () => {
+  const cfg = config([agent('default-worker'), agent('sandbox', { skills: ['infra'], scopes: ['SilasSolivagus/DSH-SuperAgent'] })])
+  // GitHub's owner/name is case-insensitive, so a scope written in another case still selects the specialist.
+  expect(suggest('infra', cfg, new Map(), 'silassolivagus/dsh-superagent').assignee).toBe('sandbox')
+  expect(suggest('infra', cfg, new Map(), 'silassolivagus/Dsh-Superagent').assignee).toBe('sandbox')
+  // A genuinely different repository still falls outside the scope.
+  expect(suggest('infra', cfg, new Map(), 'silassolivagus/other').assignee).toBe('default-worker')
+  // `*` still matches every repository.
+  const wildcard = config([agent('default-worker'), agent('any', { skills: ['infra'], scopes: ['*'] })])
+  expect(suggest('infra', wildcard, new Map(), 'someone/else').assignee).toBe('any')
+})
+
 it('records what routing would have decided and leaves the ticket alone', () => {
   const store = new Store(join(directory, 'orchestrator.sqlite'))
   store.set(KV.assignees.config, config([agent('default-worker'), agent('ui', { skills: ['visual'] })]))

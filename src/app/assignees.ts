@@ -84,12 +84,15 @@ const covers = (agent: Agent, workType: WorkType, repo: string | undefined): boo
 
 const COST_SCORE: Record<Agent['cost'], number> = { low: 1, mid: 0.5, high: 0 }
 
+/** A success rate is a fraction in [0, 1]: clamp a caller's out-of-range value, and treat a non-finite one as no history. */
+const clampRate = (value: number): number => (Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0)
+
 /**
  * Choose an executor for one work type: hard-filter on capability and free slots, then rank by capability
  * coverage, free capacity, cost and history. Anything unqualified falls back to `default-worker` rather than
  * failing, so a ticket never waits on a routing decision.
  * @param load - how many tickets each agent already holds, by agent id.
- * @param history - an optional success rate per agent for this work type, in [0, 1].
+ * @param history - an optional success rate per agent for this work type; a value outside [0, 1] is clamped to that range.
  */
 export function suggest(workType: WorkType | null, config: AssigneesConfig, load: ReadonlyMap<string, number> = new Map(),
   repo: string | undefined = undefined, history: (agent: string) => number = () => 0): Suggestion {
@@ -104,7 +107,9 @@ export function suggest(workType: WorkType | null, config: AssigneesConfig, load
     // any agent that names this work type, so adding a specialist is enough to start routing to it.
     const skills = agent.skills.includes('*') ? 0.25 : Math.min(1, agent.skills.filter(skill => skill === workType).length)
     const free = 1 - (load.get(agent.id) ?? 0) / agent.concurrency
-    const score = 3 * skills + 2 * free + COST_SCORE[agent.cost] + 0.5 * history(agent.id)
+    // `history` is a rate, but the caller is not trusted: an unbounded value would outweigh capability and
+    // capacity and could turn a weak match into a confident one.
+    const score = 3 * skills + 2 * free + COST_SCORE[agent.cost] + 0.5 * clampRate(history(agent.id))
     return { agent, score, free }
   }).sort((left, right) => right.score - left.score)
   const best = scored[0]!

@@ -92,6 +92,26 @@ it('ranks a specialist above the default agent for the work type it covers', () 
   expect(result.evidence[0]).toBe('skill:visual|copy')
 })
 
+it('clamps history to [0, 1] before scoring', () => {
+  // Identical specialists make the history term the only difference, so equal scores prove equal input.
+  const cfg = config([agent('default-worker'), agent('a', { skills: ['bugfix'] }), agent('b', { skills: ['bugfix'] })])
+  const at = (rate: number) => suggest('bugfix', cfg, new Map(), undefined, () => rate)
+  // An out-of-range 5 must score exactly like the maximum legitimate rate, 1.
+  expect(at(5).score).toBe(at(1).score)
+  expect(at(5).assignee).toBe(at(1).assignee)
+  // The lower bound is clamped the same way.
+  expect(at(-3)).toEqual(at(0))
+  // A non-finite value is no history at all, rather than a NaN score no comparison can rank.
+  expect(at(Number.NaN)).toEqual(at(0))
+})
+
+it('does not let out-of-range history push a weak match past the fallback threshold', () => {
+  // Both candidates are one slot from capacity and expensive, so a legitimate rate keeps them below 2.
+  const cfg = config([agent('wild-a', { cost: 'high', concurrency: 16 }), agent('wild-b', { cost: 'high', concurrency: 16 })])
+  const load = new Map([['wild-a', 15], ['wild-b', 15]])
+  expect(suggest('docs', cfg, load, undefined, () => 5)).toMatchObject({ assignee: 'default-worker', fallback: 'lowConfidence' })
+})
+
 it('prefers the idle agent when two agents cover the same work type', () => {
   const cfg = config([agent('default-worker'), agent('busy', { skills: ['bugfix'] }), agent('free', { skills: ['bugfix'] })])
   const result = suggest('bugfix', cfg, new Map([['busy', 2]]))

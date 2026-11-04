@@ -217,3 +217,13 @@ it('measures work-type coverage: an accept that names none is recorded with no s
     expect(readShadow(h.runtime.store, keys[0]!.slice('assignees-shadow:'.length))).toMatchObject({ workType: null, enabled: false })
   } finally { await h.stop() }
 })
+
+it('judges a repository-scoped roster against the repository the work is in', () => {
+  const store = new Store(join(directory, 'orchestrator.sqlite'))
+  store.set(KV.assignees.config, config([agent('default-worker'), agent('docs-scribe', { skills: ['docs'], scopes: ['acme/widgets'], cost: 'low' })]))
+  const inside = recordShadow(store, { decisionId: 'd-in', workType: 'docs', repo: 'acme/widgets' })
+  expect(inside.suggestion.assignee).toBe('docs-scribe')
+  // The same work in another repository leaves the scoped post ineligible, so the wildcard covers it.
+  const outside = recordShadow(store, { decisionId: 'd-out', workType: 'docs', repo: 'acme/other' })
+  expect(outside.suggestion).toMatchObject({ assignee: 'default-worker', fallback: 'single' })
+})

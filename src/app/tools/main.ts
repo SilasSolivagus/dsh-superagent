@@ -106,8 +106,10 @@ function route(host: MainToolsHost, item: RouteItem, decided: ReadonlyMap<string
         return { decision: 'accept', reason: `Already accepted as ${decision.ticketId}; title and acknowledgement unchanged`, ticketId: decision.ticketId }
       }
       // Routing is recorded, not applied: `recordShadow` writes what it would have decided and changes nothing.
+      // The roster can be scoped to one repository, so the shadow suggestion is judged against the configured one.
+      const github = host.store.settings().sources.github?.config as { repository?: string } | undefined
       const shadow = recordShadow(host.store, { decisionId: decision.id, ticketId: decision.ticketId,
-        workType: (item.work_type ?? null) as WorkType | null })
+        workType: (item.work_type ?? null) as WorkType | null, ...(github?.repository ? { repo: github.repository } : {}) })
       return { ...fromDecision(decision), triggerIds: decision.triggerIds,
         shadow: { assignee: shadow.suggestion.assignee, workType: shadow.workType, ...(shadow.suggestion.fallback ? { fallback: shadow.suggestion.fallback } : {}) } }
     }

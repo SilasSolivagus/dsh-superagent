@@ -169,11 +169,13 @@ export function suggest(workType: WorkType | null, config: AssigneesConfig, load
  * Record what routing would have decided for an accepted ticket, without changing what happens to it.
  * Writes one KV entry per decision; nothing reads it back into the work path.
  */
-export function recordShadow(store: Pick<Store, 'get' | 'set'>, input: { decisionId: string; ticketId?: string; workType: WorkType | null; now?: Date }): ShadowRecord {
+export function recordShadow(store: Pick<Store, 'get' | 'set'>, input: { decisionId: string; ticketId?: string; workType: WorkType | null
+  /** The repository the work is in, so a roster scoped to one repository is judged against it. */
+  repo?: string; now?: Date }): ShadowRecord {
   const { config } = loadConfig(store)
   const record: ShadowRecord = { at: (input.now ?? new Date()).toISOString(), decisionId: input.decisionId,
     ...(input.ticketId ? { ticketId: input.ticketId } : {}), workType: input.workType,
-    suggestion: suggest(input.workType, config), enabled: config.enabled }
+    suggestion: suggest(input.workType, config, new Map(), input.repo), enabled: config.enabled }
   store.set(KV.assignees.shadow(input.decisionId), record)
   return record
 }

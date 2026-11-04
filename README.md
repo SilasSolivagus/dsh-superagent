@@ -47,7 +47,7 @@ Each agent names the work it can take:
 
 ### Reading the shadow records
 
-The records live in the state database: rows of the `kv` table whose key starts with `assignees-shadow:`. Point `sqlite3` at that database once, filling in the state directory from the deployment configuration:
+The records live in the state database: rows of the `kv` table whose key starts with `assignees-shadow:`. The **Execution** tab of the panel lists the last 20 with the work type, the suggested assignee, the fallback reason and whether the configuration changed since. The same records can be read directly. Point `sqlite3` at that database once, filling in the state directory from the deployment configuration:
 
 ```sh
 db=<stateDir>/orchestrator.sqlite
@@ -80,7 +80,7 @@ sqlite3 -header -column "$db" "
   ORDER BY 1, decisions DESC;"
 ```
 
-These records are write-only: `recordShadow` writes one per explicit accept, nothing reads them back into the work path, and the accept continues exactly as before. The queries therefore observe what routing would decide without changing which executor runs the Ticket.
+These records are write-only in the work path: `recordShadow` writes one per explicit accept, and nothing reads them back into the work path (the panel reads them only to display the list above). The accept continues exactly as before. The queries therefore observe what routing would decide without changing which executor runs the Ticket.
 
 A ticket accepted for an agent that later leaves the roster still launches, but as the built-in worker; the launch records a note on the ticket naming the missing agent, so the fallback is visible on the ticket and to the worker instead of being silent.
 

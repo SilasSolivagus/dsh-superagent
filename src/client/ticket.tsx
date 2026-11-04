@@ -138,6 +138,10 @@ export function TicketPage({ id }: { id: string }) {
       <StageMark state={status.dot} icon={status.icon} label={status.label} />
       <LabelValue label={t('ticketMandateLabel')} value={valueLabel(t, 'strength', data.mandate.strength)} />
       <LabelValue label={t('ticketActorLabel')} value={`${valueLabel(t, 'source', data.mandate.actor.source)} · ${actor}`} />
+      {data.assignee && <LabelValue label={t('ticketAssigneeLabel')} value={<>
+        <span className="dt-mono">{data.assignee.id}</span> <Tag tone={data.assignee.inRoster ? 'neutral' : 'warning'}>
+          {data.assignee.inRoster ? t('assigneeInRoster') : t('assigneeMissing')}</Tag>
+      </>} />}
       <LabelValue label={t('ticketUpdatedLabel')} value={when(data.updatedAt, t('lang'))} />
     </div>
     {ended && <Hint>{ended}</Hint>}

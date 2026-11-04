@@ -3,13 +3,13 @@ import { useRef, useState } from 'react'
 import { TICKET_FILTERS, type TicketFilter } from '../app/api.ts'
 import { LIMITS } from '../limits.ts'
 import { usePoll, type SettingsView, type SourceView, type StateView } from './api.ts'
-import { DisclosureRow, Icon, InfoTip, Input, Pill } from './controls.tsx'
+import { DisclosureRow, Icon, InfoTip, Input, Pill, Tag } from './controls.tsx'
 import { SaveBar } from './draft.tsx'
 import { usePanel } from './provider.tsx'
 import { TicketLine } from './rows.tsx'
 import { ConfigHistory, Field, Fields, ModelField, numberOf, useBlockDraft, useSettings } from './settings-kit.tsx'
-import { localized } from './text.ts'
-import { ConfirmButton, Hint, LabelValue, LoadMore, LoadState, Section, StatusHead } from './widgets.tsx'
+import { localized, valueLabel } from './text.ts'
+import { ConfirmButton, Hint, LabelValue, LoadMore, LoadState, Section, StatusHead, When } from './widgets.tsx'
 
 export function ExecutionStatus({ filter: current, state, reload }: {
   filter: TicketFilter; state: StateView; reload: () => Promise<void>
@@ -17,6 +17,8 @@ export function ExecutionStatus({ filter: current, state, reload }: {
   const { t, call, navigate } = usePanel()
   const [limit, setLimit] = useState(20)
   const { data, error, reload: reloadTickets } = usePoll(() => call('GET tickets', { query: { state: current, limit } }), [current, limit])
+  // Shadow records are written by the accept path regardless of the filter, so this page shows the same last 20 records under every filter.
+  const { data: shadows, error: shadowError } = usePoll(() => call('GET assignees/shadow'), [])
   const { paused, load: { maxWorkers } } = state
   // Pausing uses its own block revision so toggling pause does not invalidate an open Execution settings draft.
   const pause = async () => { await call('POST executor/pause', { body: { paused: !paused } }); await reload() }
@@ -47,6 +49,20 @@ export function ExecutionStatus({ filter: current, state, reload }: {
       ? <TicketLine key={ticket.id} ticket={ticket} question
         onChanged={reloadTickets} /> : <TicketLine key={ticket.id} ticket={ticket} />)}</ul> : <Hint>{t('none')}</Hint>)}
     {data?.next_offset != null && <LoadMore onMore={() => setLimit(limit + 20)} />}
+    <Section title={t('shadowTitle')} count={shadows?.items.length} hint={t('shadowHint')}>
+      {shadowError && <LoadState error={shadowError} loading={false} />}
+      {shadows && (shadows.items.length ? <table className="dt-table">
+        <thead><tr><th>{t('shadowAt')}</th><th>{t('shadowWorkType')}</th><th>{t('shadowAssignee')}</th><th>{t('shadowFallback')}</th>
+          <th>{t('shadowConfiguration')}</th></tr></thead>
+        <tbody>{shadows.items.map(item => <tr key={item.decisionId}>
+          <td><When at={item.at} /></td>
+          <td>{item.workType ? valueLabel(t, 'workType', item.workType) : t('shadowNoWorkType')}</td>
+          <td className="dt-mono">{item.assignee}</td>
+          <td>{item.fallback ? valueLabel(t, 'fallback', item.fallback) : t('shadowRanking')}</td>
+          <td>{item.stale ? <Tag tone="warning">{t('shadowStale')}</Tag> : <span className="dt-hint">{t('shadowCurrent')}</span>}</td>
+        </tr>)}</tbody>
+      </table> : <Hint>{t('shadowNone')}</Hint>)}
+    </Section>
   </>
 }
 

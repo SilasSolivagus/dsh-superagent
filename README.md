@@ -39,7 +39,7 @@ The cost is the panel. A settings block brings a form, validation on save and a 
 Each agent names the work it can take:
 
 - `skills`: work types (`copy`, `visual`, `bugfix`, `refactor`, `test`, `docs`, `infra`, `review`, `other`). `*` matches every type, but contributes only 0.25 to the rank, while naming the type contributes 1. Adding an agent that names a type can therefore be enough for routing to prefer it over the wildcard default.
-- `scopes`: repositories as `owner/name`; `*` matches any. An agent whose scopes exclude the repository is not considered.
+- `scopes`: repositories as `owner/name`, matched case-insensitively as GitHub does; `*` matches any. An agent whose scopes exclude the repository is not considered.
 - `concurrency`: the most Tickets the agent may hold at once, from 1 to 16. A full agent is not considered.
 - `cost`: `low`, `mid` or `high`; a lower cost ranks higher when the other factors are equal.
 

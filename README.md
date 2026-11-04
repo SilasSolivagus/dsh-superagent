@@ -46,6 +46,43 @@ Each agent names the work it can take:
 
 `preset` and `model` are optional overrides for the worker preset and the model from the execution settings. The router writes each decision to `assignees-shadow:<decisionId>`: the work type, the chosen assignee with its score and evidence, any fallback reason, and whether `enabled` was on when the decision was made. A fallback names an agent that is actually in the roster: `default-worker` when present, otherwise the first agent with a `*` skill, otherwise the first agent. Its evidence records the rule (`fallback:default-worker`, `fallback:first-wildcard` or `fallback:first-agent`) and the chosen id.
 
+### Reading the shadow records
+
+The records live in the state database: rows of the `kv` table whose key starts with `assignees-shadow:`. Point `sqlite3` at that database once, filling in the state directory from the deployment configuration:
+
+```sh
+db=<stateDir>/orchestrator.sqlite
+```
+
+The latest decisions, newest first: the work type, the assignee routing suggested, and the fallback reason (empty when a candidate was ranked):
+
+```sh
+sqlite3 -header -column "$db" "
+  SELECT json_extract(value, '$.at')                  AS at,
+         json_extract(value, '$.workType')            AS work_type,
+         json_extract(value, '$.suggestion.assignee') AS assignee,
+         json_extract(value, '$.suggestion.fallback') AS fallback
+  FROM kv
+  WHERE key LIKE 'assignees-shadow:%'
+  ORDER BY at DESC
+  LIMIT 20;"
+```
+
+One `GROUP BY` counts where each work type has been landing; `(none)` means the accept named no work type:
+
+```sh
+sqlite3 -header -column "$db" "
+  SELECT COALESCE(json_extract(value, '$.workType'), '(none)') AS work_type,
+         json_extract(value, '$.suggestion.assignee')          AS assignee,
+         COUNT(*)                                               AS decisions
+  FROM kv
+  WHERE key LIKE 'assignees-shadow:%'
+  GROUP BY 1, 2
+  ORDER BY 1, decisions DESC;"
+```
+
+These records are write-only: `recordShadow` writes one per explicit accept, nothing reads them back into the work path, and the accept continues exactly as before. The queries therefore observe what routing would decide without changing which executor runs the Ticket.
+
 ## Documentation
 
 Read the numbered documents in order; each builds only on the ones before it.

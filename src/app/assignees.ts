@@ -197,10 +197,33 @@ export function suggest(workType: WorkType | null, config: AssigneesConfig, load
 }
 
 /**
- * Record what routing would have decided for an accepted ticket, without changing what happens to it.
- * Writes one KV entry per decision; nothing reads it back into the work path.
+ * How many recent shadow records to keep. The record is an audit aid for judging routing before enabling it, so a
+ * bounded window of recent decisions is enough; pruning the oldest keeps the KV from growing without bound. It must
+ * stay comfortably larger than the volume an operator reviews at once, and small enough that storage is trivial.
  */
-export function recordShadow(store: Pick<Store, 'get' | 'set'>, input: { decisionId: string; ticketId?: string; workType: WorkType | null
+export const SHADOW_KEEP = 100
+
+/**
+ * Delete the oldest shadow records beyond `SHADOW_KEEP`, keeping the most recent by their `at` timestamp. Best-effort:
+ * a record without a readable `at` sorts as the oldest. Reading is unaffected because only the newest records are kept,
+ * and the record just written by `recordShadow` is the newest of all, so it is never removed by the prune that follows.
+ */
+function pruneShadow(store: Pick<Store, 'get' | 'keys' | 'delete'>): void {
+  const keys = store.keys(KV.assignees.shadow)
+  if (keys.length <= SHADOW_KEEP) return
+  const prefix = KV.assignees.shadow.prefix
+  const byAge = keys.map(key => {
+    const record = store.get(KV.assignees.shadow(key.slice(prefix.length))) as ShadowRecord | undefined
+    return { key, at: record?.at ?? '' }
+  }).sort((left, right) => left.at.localeCompare(right.at))
+  for (const { key } of byAge.slice(0, byAge.length - SHADOW_KEEP)) store.delete(key)
+}
+
+/**
+ * Record what routing would have decided for an accepted ticket, without changing what happens to it.
+ * Writes one KV entry per decision, then prunes the oldest shadow records beyond `SHADOW_KEEP`; nothing reads them back into the work path.
+ */
+export function recordShadow(store: Pick<Store, 'get' | 'set' | 'keys' | 'delete'>, input: { decisionId: string; ticketId?: string; workType: WorkType | null
   /** The repository the work is in, so a roster scoped to one repository is judged against it. */
   repo?: string; now?: Date }): ShadowRecord {
   const { config } = loadConfig(store)
@@ -208,6 +231,7 @@ export function recordShadow(store: Pick<Store, 'get' | 'set'>, input: { decisio
     ...(input.ticketId ? { ticketId: input.ticketId } : {}), workType: input.workType,
     suggestion: suggest(input.workType, config, new Map(), input.repo), enabled: config.enabled }
   store.set(KV.assignees.shadow(input.decisionId), record)
+  pruneShadow(store)
   return record
 }
 

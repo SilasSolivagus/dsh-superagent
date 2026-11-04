@@ -82,10 +82,53 @@ export function loadConfig(store: Pick<Store, 'get'>): { config: AssigneesConfig
 const covers = (agent: Agent, workType: WorkType, repo: string | undefined): boolean =>
   (agent.skills.includes('*') || agent.skills.includes(workType)) && (agent.scopes.includes('*') || (repo !== undefined && agent.scopes.includes(repo)))
 
+/** Score per cost tier, before `WEIGHTS.cost` scales it. */
 const COST_SCORE: Record<Agent['cost'], number> = { low: 1, mid: 0.5, high: 0 }
 
 /** A success rate is a fraction in [0, 1]: clamp a caller's out-of-range value, and treat a non-finite one as no history. */
 const clampRate = (value: number): number => (Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0)
+
+/**
+ * Weights for the four signals `suggest` ranks on. They only order candidates that already passed the
+ * capability, scope and capacity filters, so tuning them changes routing preference, never eligibility.
+ * The values are relative to each other and are compared against the absolute `MIN_SCORE`.
+ */
+const WEIGHTS = {
+  /**
+   * Capability dominates. A candidate that names the work type scores 1 (3 points); the wildcard agent
+   * scores 0.25 (0.75 points), so the specialist leads by 2.25 points before load, cost or history.
+   * Raising this makes capability matter even more; lowering it lets a wildcard agent compete for work
+   * a specialist already covers.
+   */
+  skills: 3,
+  /**
+   * Free capacity, as the idle fraction of the agent's slots. A fully idle agent gains 2 points over a
+   * saturated one, but saturated agents are filtered out before scoring, so the real contribution is
+   * (0, 2]. Raising this lets load outweigh a capability gap; lowering it makes routing ignore load
+   * until an agent is full.
+   */
+  free: 2,
+  /**
+   * Cost tie-break, scaled by `COST_SCORE` (low 1, mid 0.5, high 0). At 1 it can separate otherwise
+   * equal agents but stays below the 2.25-point specialist advantage. Raising it starts trading
+   * capability for cheapness; lowering it leaves history as the main tie-break.
+   */
+  cost: 1,
+  /**
+   * Historical success rate, in [0, 1]. At 0.5 it contributes at most half a point, so it refines
+   * near-ties without overriding capability or capacity. Raising it lets past outcomes steer routing
+   * strongly enough to overcome cost; lowering it reduces history to a last-resort tie-break.
+   */
+  history: 0.5,
+} as const
+
+/**
+ * Confidence floor for assigning a candidate instead of falling back to `default-worker`. A candidate
+ * that names the work type clears it on capability alone (3 points); a wildcard candidate starts at
+ * 0.75 and needs at least 1.25 more from load, cost and history. Raising it makes routing more
+ * conservative (above 3 it would also reject specialists); lowering it routes to weaker matches.
+ */
+const MIN_SCORE = 2
 
 /**
  * Choose an executor for one work type: hard-filter on capability and free slots, then rank by capability
@@ -111,12 +154,13 @@ export function suggest(workType: WorkType | null, config: AssigneesConfig, load
     const free = 1 - (load.get(agent.id) ?? 0) / agent.concurrency
     // `history` is a rate, but the caller is not trusted: an unbounded value would outweigh capability and
     // capacity and could turn a weak match into a confident one.
-    const score = 3 * skills + 2 * free + COST_SCORE[agent.cost] + 0.5 * clampRate(history(agent.id))
+    const score = WEIGHTS.skills * skills + WEIGHTS.free * free + WEIGHTS.cost * COST_SCORE[agent.cost]
+      + WEIGHTS.history * clampRate(history(agent.id))
     return { agent, score, free }
   }).sort((left, right) => right.score - left.score)
   const best = scored[0]!
   // A specialist that barely beats the default is not worth a separate executor; the caller sees why.
-  if (best.score < 2) return fallback('lowConfidence')
+  if (best.score < MIN_SCORE) return fallback('lowConfidence')
   return { assignee: best.agent.id, score: Number(best.score.toFixed(3)),
     evidence: [`skill:${best.agent.skills.join('|')}`, `free:${best.free.toFixed(2)}`, `cost:${best.agent.cost}`] }
 }

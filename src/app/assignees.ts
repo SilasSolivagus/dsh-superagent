@@ -104,8 +104,10 @@ export function suggest(workType: WorkType | null, config: AssigneesConfig, load
   if (candidates.length === 1) return { assignee: candidates[0]!.id, score: 0, evidence: [`only:${candidates[0]!.id}`], fallback: 'single' }
   const scored = candidates.map(agent => {
     // A wildcard agent can take anything, but it is the fallback rather than the best match: score it below
-    // any agent that names this work type, so adding a specialist is enough to start routing to it.
-    const skills = agent.skills.includes('*') ? 0.25 : Math.min(1, agent.skills.filter(skill => skill === workType).length)
+    // any agent that names this work type, so adding a specialist is enough to start routing to it. An agent
+    // that lists both still earns its explicit hit, so the wildcard only fills in when nothing names the type.
+    const explicit = Math.min(1, agent.skills.filter(skill => skill === workType).length)
+    const skills = Math.max(agent.skills.includes('*') ? 0.25 : 0, explicit)
     const free = 1 - (load.get(agent.id) ?? 0) / agent.concurrency
     // `history` is a rate, but the caller is not trusted: an unbounded value would outweigh capability and
     // capacity and could turn a weak match into a confident one.

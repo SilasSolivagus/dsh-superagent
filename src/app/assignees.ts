@@ -11,6 +11,7 @@ import type { Store } from './store.ts'
 import { KV } from '../kv.ts'
 import { RoleModelSchema } from '../policy.ts'
 import { key } from '../core/index.ts'
+import { sameName } from '../infra/text.ts'
 
 /** The kind of change a request actually asks for, judged from the request itself, not from its wording. */
 export const WORK_TYPES = ['copy', 'visual', 'bugfix', 'refactor', 'test', 'docs', 'infra', 'review', 'other'] as const
@@ -121,9 +122,10 @@ export function configFingerprint(config: AssigneesConfig): string {
   }))
 }
 
-/** Whether `agent` may take `workType` and this `repo`. */
+/** Whether `agent` may take `workType` and this `repo`. Scopes compare like GitHub's owner/name, so case does not matter. */
 const covers = (agent: Agent, workType: WorkType, repo: string | undefined): boolean =>
-  (agent.skills.includes('*') || agent.skills.includes(workType)) && (agent.scopes.includes('*') || (repo !== undefined && agent.scopes.includes(repo)))
+  (agent.skills.includes('*') || agent.skills.includes(workType))
+  && (agent.scopes.includes('*') || (repo !== undefined && agent.scopes.some(scope => sameName(scope, repo))))
 
 /** Score per cost tier, before `WEIGHTS.cost` scales it. */
 const COST_SCORE: Record<Agent['cost'], number> = { low: 1, mid: 0.5, high: 0 }

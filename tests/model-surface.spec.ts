@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, expect, it, vi } from 'vitest'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
+import { WORK_TYPES } from '../src/app/assignees.ts'
 import { latestAssignment } from '../src/core/index.ts'
 import { promptParts } from '../src/app/prompts.ts'
 import { RESOURCES } from '../src/app/resources.ts'
@@ -372,6 +373,15 @@ it('names only registered tools, schema options, environment variables and gloss
   const fixed = [...known].filter(([failure]) => !found.has(failure))
     .map(([failure, owner]) => `${owner}: ${failure} (fixed: drop it from KNOWN_FAILURES)`)
   expect([...drift, ...fixed], 'model-facing text differs from KNOWN_FAILURES; each line starts with the owner of the text').toEqual([])
+})
+
+it('names every work_type value in the parameter description, where the model reads the enum', () => {
+  let description: string | undefined
+  walk(toolsOf('orchestrator').get('orchestrator_route')!.parameters, (node, property) => {
+    if (property === 'work_type' && typeof node.description === 'string') description = node.description
+  })
+  expect(description, 'orchestrator_route declares work_type with a description').toBeDefined()
+  for (const workType of WORK_TYPES) expect(description!, `the work_type description names ${workType}`).toContain(workType)
 })
 
 it('enforces the word limits the text states', async () => {

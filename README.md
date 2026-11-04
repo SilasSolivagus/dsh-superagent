@@ -34,6 +34,27 @@ Read the numbered documents in order; each builds only on the ones before it.
 
 `pnpm check` runs the typecheck, the tests and the build.
 
+## Run locally
+
+Local runs need Node.js 22.19+ or 24+, pnpm, and a DeepSeek Harness version within `engines.dsh` in `package.json`; [SETUP.md](SETUP.md) lists the remaining prerequisites and the accounts a full installation needs. Install the dependencies and run the checks; the build writes the `lib/` that the profile loads:
+
+```sh
+pnpm install
+pnpm check   # typecheck, tests and build
+```
+
+The agent runs in a dedicated DeepSeek Harness profile, `superagent`. Create it once, on a machine that has no `superagent` profile yet, install this checkout into it, and start it:
+
+```sh
+dsh superagent --from-default-profile web --dump-config > /dev/null
+dsh plugin --profile superagent add "link:$PWD"
+cp examples/profile.cordis.patch.yml ~/.dsh/profiles/superagent/cordis.patch.yml  # then replace the placeholders
+scripts/dsh-superagent start
+scripts/dsh-superagent status
+```
+
+`status` reports health and setup problems; [docs/006-deployment.md](docs/006-deployment.md) covers configuration and upgrades.
+
 ## License
 
 [MIT](LICENSE)

@@ -247,3 +247,27 @@ it('judges a repository-scoped roster against the repository the work is in', ()
   const outside = recordShadow(store, { decisionId: 'd-out', workType: 'docs', repo: 'acme/other' })
   expect(outside.suggestion).toMatchObject({ assignee: 'default-worker', fallback: 'single' })
 })
+
+it('names the picked agent on the ticket when routing is enabled, and leaves it unnamed otherwise', async () => {
+  const h = await startRuntime()
+  try {
+    const roster = { version: 1, enabled: true, agents: [agent('default-worker'), agent('docs-scribe', { skills: ['docs'], scopes: ['*'] })] }
+    h.runtime.store.set(KV.assignees.config, roster)
+    const first = feishu('21', '@bot README 补一句用途说明')
+    h.runtime.receive(first); await h.runtime.idle()
+    await h.runTool(h.runtime.masterId, 'orchestrator_route', { decisions: [{ kind: 'accept', trigger_id: first.id,
+      title: 'README 补一句', worktree_name: 'readme-note', acknowledgement: '补一句用途说明', work_type: 'docs' }] })
+    // P1: the specialist the suggestion names is written onto the ticket, so launch starts that agent's worker.
+    const routed = h.runtime.store.tickets.open().find(ticket => ticket.title === 'README 补一句')!
+    expect(routed.execution?.assignee).toBe('docs-scribe')
+
+    // With routing off the same work is accepted exactly as before: no assignee on the record.
+    h.runtime.store.set(KV.assignees.config, { ...roster, enabled: false })
+    const second = feishu('22', '@bot README 再补一句')
+    h.runtime.receive(second); await h.runtime.idle()
+    await h.runTool(h.runtime.masterId, 'orchestrator_route', { decisions: [{ kind: 'accept', trigger_id: second.id,
+      title: 'README 再补一句', worktree_name: 'readme-note-2', acknowledgement: '再补一句', work_type: 'docs' }] })
+    const plain = h.runtime.store.tickets.open().find(ticket => ticket.title === 'README 再补一句')!
+    expect(plain.execution?.assignee).toBeUndefined()
+  } finally { await h.stop() }
+})

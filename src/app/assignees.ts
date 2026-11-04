@@ -204,6 +204,15 @@ export function recordShadow(store: Pick<Store, 'get' | 'set'>, input: { decisio
   return record
 }
 
+/**
+ * The agent a ticket's `execution.assignee` names, or `undefined` when it names none or the configuration no longer
+ * has it (an agent the operator removed while its tickets were still running). The caller then keeps today's worker.
+ */
+export function assignedAgent(store: Pick<Store, 'get'>, assignee: string | undefined): Agent | undefined {
+  if (!assignee) return undefined
+  return loadConfig(store).config.agents.find(agent => agent.id === assignee)
+}
+
 /** Read a recorded shadow decision, for the panel and for tests. */
 export function readShadow(store: Pick<Store, 'get'>, decisionId: string): ShadowRecord | undefined {
   // The key is untyped in `KV` so this module stays the only place that spells the record: read it back as one.

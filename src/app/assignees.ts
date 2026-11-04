@@ -260,7 +260,8 @@ export function recordShadow(store: Pick<Store, 'get' | 'set' | 'keys' | 'delete
 
 /**
  * The agent a ticket's `execution.assignee` names, or `undefined` when it names none or the configuration no longer
- * has it (an agent the operator removed while its tickets were still running). The caller then keeps today's worker.
+ * has it (an agent the operator removed while its tickets were still running). The caller then keeps today's worker,
+ * and `DshExecutor.launch` records a note on the ticket so the fallback is not silent.
  */
 export function assignedAgent(store: Pick<Store, 'get'>, assignee: string | undefined): Agent | undefined {
   if (!assignee) return undefined

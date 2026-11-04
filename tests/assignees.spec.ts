@@ -334,3 +334,25 @@ it('lets an agent start only as many tickets as its roster entry allows', () => 
   expect(agentAllows(roster, 2)).toBe(false)        // its own slot is full, so the launch waits
   expect(agentAllows(roster, 3)).toBe(false)
 })
+
+it('records a note on the ticket when the assigned agent left the roster before its worker launched', async () => {
+  const h = await startRuntime()
+  try {
+    const roster = { version: 1, enabled: true, agents: [agent('default-worker'), agent('docs-scribe', { skills: ['docs'], scopes: ['*'] })] }
+    h.runtime.store.set(KV.assignees.config, roster)
+    const first = feishu('31', '@bot README 补一句用途说明')
+    h.runtime.receive(first); await h.runtime.idle()
+    // Accept for docs-scribe while it is still in the roster; the launch is queued but has not run yet.
+    await h.runTool(h.runtime.masterId, 'orchestrator_route', { decisions: [{ kind: 'accept', trigger_id: first.id,
+      title: 'README 补一句', worktree_name: 'readme-note', acknowledgement: '补一句用途说明', work_type: 'docs' }] })
+    const ticket = h.runtime.store.tickets.open().find(item => item.title === 'README 补一句')!
+    expect(ticket.execution?.assignee).toBe('docs-scribe')
+    // Remove docs-scribe from the roster before the worker launches, then run the queued launch.
+    h.runtime.store.set(KV.assignees.config, { ...roster, agents: [agent('default-worker')] })
+    await h.runtime.idle()
+    // The fallback left a durable trace: a note Input naming the removed agent, shown on the ticket and delivered to the worker.
+    const stored = h.runtime.store.tickets.get(ticket.id)!
+    expect(stored.inputs).toEqual([expect.objectContaining({ kind: 'note',
+      text: 'The roster agent `docs-scribe` this ticket was accepted for no longer exists, so the built-in worker runs instead.' })])
+  } finally { await h.stop() }
+})

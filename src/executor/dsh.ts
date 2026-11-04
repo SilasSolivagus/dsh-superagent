@@ -8,8 +8,9 @@ import { key, latestAssignment, latestReport, liveTicket, runningAssignment, thr
 import type { AssessmentOutcome, Assignment, EngineForExecutor, Execution, Executor, Mandate, PolicyEffect, Ticket, TicketInput, Trigger }
   from '../core/index.ts'
 import type { Machine } from '../deployment.ts'
+import { assignedAgent } from '../app/assignees.ts'
 import { runAsWorker, verifyDirectory } from '../infra/environment.ts'
-import type { Settings } from '../policy.ts'
+import type { RoleModel, Settings } from '../policy.ts'
 import type { Store } from '../app/store.ts'
 import { Later, type Effects } from '../app/effects.ts'
 import { executionRoot, type Variable } from '../app/execution-environment.ts'
@@ -62,7 +63,7 @@ export interface ExecutorHost {
   /** Where the Executor reports what happened to Assignments and Inputs. */
   readonly engine: Pick<EngineForExecutor, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed' | 'report'
     | 'assignmentInterrupted'>
-  readonly store: Pick<Store, 'tickets' | 'triggers' | 'set' | 'settings' | 'atomic' | 'afterCommit'>
+  readonly store: Pick<Store, 'tickets' | 'triggers' | 'get' | 'set' | 'settings' | 'atomic' | 'afterCommit'>
   /** Durable effect queue through which launches and input deliveries run. */
   readonly effects: Pick<Effects, 'enqueue' | 'handle'>
   /** The `worker` health entry, which reports whether background worker event handling failed. */
@@ -236,7 +237,9 @@ export class DshExecutor implements Executor {
   }
   /** Populates a newly accepted ticket's `execution` attributes (worktree name, workspace directory, and assignment text). */
   prepare(ticket: Ticket, outcome: Extract<AssessmentOutcome, { kind: 'accept' }>): Ticket {
-    return { ...ticket, execution: ticketExecution(ticket, outcome, this.host.store.settings(), this.host.machine.stateDir) }
+    const execution = ticketExecution(ticket, outcome, this.host.store.settings(), this.host.machine.stateDir)
+    // The agent the router picked travels with the execution record, so `launch` can start that agent's worker.
+    return { ...ticket, execution: outcome.assignee ? { ...execution, assignee: outcome.assignee } : execution }
   }
   /**
    * Runs the configured `executor.prepare` command for a new ticket workspace in its parent directory with the ticket's
@@ -438,7 +441,20 @@ export class DshExecutor implements Executor {
     }
     if (!current()) return
     const sessionId = workerSessionId(ticket.id)
-    const agent = await this.host.sessions.ensure(sessionId, workspace, ticket.title, 'worker')
+    // P1: a ticket accepted for a named agent runs with that agent's preset and model, so routing changes what actually
+    // runs. An assignee the configuration no longer has, or a preset that no longer exists, keeps the built-in worker.
+    const assigned = assignedAgent(this.host.store, ticket.execution?.assignee)
+    const ensureWorker = (options: { preset?: string; model?: RoleModel | null }) =>
+      this.host.sessions.ensure(sessionId, workspace, ticket.title, 'worker', options)
+    const options = assigned ? { preset: assigned.preset, model: assigned.model } : {}
+    let agent
+    try { agent = await ensureWorker(options) }
+    catch (error) {
+      if (!options.preset) throw error
+      this.host.context.logger.warn('dsh-superagent could not start ticket %s with preset %s (%s); using the worker preset',
+        ticket.id, options.preset, String(error))
+      agent = await ensureWorker({ model: options.model })
+    }
     if (!current()) return
     // The background work of the Assignment this one replaces stops first, so its end does not clear this one's message.
     await this.stopped(ticket.id)

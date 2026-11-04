@@ -1240,12 +1240,12 @@ describe('observing the GitHub repository', () => {
     expect(h.receive.mock.calls.map(([trigger]) => [trigger.meta.number, trigger.meta.kind, trigger.id]))
       .toEqual([[4, 'issue', issueTrigger(issue(4), 'agent-bot').id], [5, 'pull', issueTrigger(issue(5), 'agent-bot').id]])
     const started = { issues: at(0), pulls: at(0) }
-    expect(h.store.get('github-stream:issues')).toEqual({ since: cursorAt(at(4)), started })
+    expect(h.store.get('github-stream:issues')).toEqual({ since: cursorAt(at(4)), started, highest: 6 })
     const list = () => calls.filter(args => args[1]!.startsWith('repos/acme/widgets/issues?'))
     expect(list()[0]![1]).toContain(`since=${encodeURIComponent(at(0))}`)
     // The next round repeats the request at the newest Issue, whose ETag the round after sends, which GitHub answers 304 for.
     await pollRound(h)
-    expect(h.store.get('github-stream:issues')).toEqual({ since: cursorAt(at(4)), started, etag: '"same"' })
+    expect(h.store.get('github-stream:issues')).toEqual({ since: cursorAt(at(4)), started, highest: 6, etag: '"same"' })
     h.receive.mockClear()
     await pollRound(h)
     expect(list().at(-1)).toEqual(expect.arrayContaining(['-H', 'If-None-Match: "same"']))
@@ -1435,4 +1435,21 @@ describe('observing the GitHub repository', () => {
     expect(h.receive.mock.calls[0]![0].text).toContain('Read github/commits/bbb2222/checks for every check.')
     h.store.close()
   })
+
+it('takes in an Issue the cursor already stepped over, because its number is above the highest read', async () => {
+  const h = host()
+  observe(h, { observeIssues: true })
+  // The stream has already read up to #4, and its cursor sits after the Issue about to appear: the `since` query alone
+  // cannot return it, and GitHub sends no notification for your own actions.
+  h.store.set('github-since', at(10))
+  h.store.set('github-stream:issues', { since: cursorAt(at(10)), started: { issues: at(0), pulls: at(0) }, highest: 4 })
+  repository(h, { issues: [issue(4, { created_at: at(1), updated_at: at(1) }),
+    issue(7, { created_at: at(2), updated_at: at(2), user: { login: 'agent-bot', type: 'User' } })] })
+  await pollRound(h)
+  // #7 is above the mark, so the repair reads it even though the stream read itself returned only #4.
+  expect(h.receive.mock.calls.map(([trigger]) => trigger.meta.number)).toContain(7)
+  expect(h.store.get('github-stream:issues')).toMatchObject({ highest: 7 })
+  h.store.close()
 })
+}
+)

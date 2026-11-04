@@ -244,12 +244,33 @@ async function readStream(ctx: SourceContext, round: Round, id: string, path: st
     const trigger = commentTrigger(item, ref, id === 'comments' ? 'conversation' : 'inline', login)
     if (trigger.text) await ctx.receive(trigger)
   }
+  // Issues share one numbering sequence, so a number above the highest one this stream has seen is new even when the
+  // `since` cursor already moved past it: GitHub sends no notification for your own actions, and a cursor taken from
+  // another item's `updated_at` can step over an Issue created a moment earlier. One cheap read of the newest Issues by
+  // creation closes that gap; anything already ingested dedupes by Trigger id.
+  if (id === 'issues' && stored?.highest !== undefined) {
+    const mark = Math.max(Number(stored.highest), 0)
+    const listed2 = `${path}&state=all&sort=created&direction=desc&per_page=20`
+    const raw2 = await ctx.commands.withSignal(round.signal).api(listed2, '--include')
+    const newest20 = validItems(ListedSchema, z.array(z.unknown()).parse(JSON.parse(included(raw2).body)), round.tally)
+    for (const item of newest20) {
+      const issue = IssueSchema.safeParse(item)
+      if (!issue.success || issue.data.pull_request) continue
+      // Anything the stream loop already took dedupes by Trigger id, so re-reading the newest page is safe.
+      if (issue.data.number <= mark) continue
+      if (!fresh(issue.data.created_at, 'issues')) continue
+      await ctx.receive(issueTrigger(issue.data, login, allowSelf))
+      nameThread(ctx, issue.data.number, issue.data.title)
+    }
+  }
   const newest = Math.max(...items.map(item => Date.parse(item.updated_at ?? '')).filter(Number.isFinite))
   const moved = Number.isFinite(newest) ? cursorAt(new Date(newest).toISOString()) : since
   const next = Date.parse(moved) > Date.parse(since) ? moved : since
   const etag = /^etag:\s*(.+)$/im.exec(headers)?.[1]?.trim()
   // The ETag belongs to this request, which the next round repeats only while the cursor stays unchanged.
-  ctx.state.set(name, { since: next, started, ...etag && next === since ? { etag } : {} })
+  const highest = Math.max(Number(stored?.highest ?? 0), ...items.map(item => Number((item as Record<string, unknown>).number)).filter(Number.isFinite))
+  ctx.state.set(name, { since: next, started, ...Number.isFinite(highest) && highest > 0 ? { highest } : {},
+    ...etag && next === since ? { etag } : {} })
 }
 /** Polls default-branch CI checks, emitting a trigger only when the set of failing checks changes after the initial baseline. */
 async function pollBranchCi(ctx: SourceContext, round: Round): Promise<void> {

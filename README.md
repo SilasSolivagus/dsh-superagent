@@ -82,6 +82,8 @@ sqlite3 -header -column "$db" "
 
 These records are write-only: `recordShadow` writes one per explicit accept, nothing reads them back into the work path, and the accept continues exactly as before. The queries therefore observe what routing would decide without changing which executor runs the Ticket.
 
+A ticket accepted for an agent that later leaves the roster still launches, but as the built-in worker; the launch records a note on the ticket naming the missing agent, so the fallback is visible on the ticket and to the worker instead of being silent.
+
 ## Documentation
 
 Read the numbered documents in order; each builds only on the ones before it.

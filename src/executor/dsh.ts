@@ -62,7 +62,7 @@ export interface ExecutorHost {
   readonly context: Context
   /** Where the Executor reports what happened to Assignments and Inputs. */
   readonly engine: Pick<EngineForExecutor, 'assignmentStarted' | 'inputsDelivered' | 'inputsRead' | 'turnEnded' | 'deliveryFailed' | 'report'
-    | 'assignmentInterrupted'>
+    | 'assignmentInterrupted' | 'note'>
   readonly store: Pick<Store, 'tickets' | 'triggers' | 'get' | 'set' | 'settings' | 'atomic' | 'afterCommit'>
   /** Durable effect queue through which launches and input deliveries run. */
   readonly effects: Pick<Effects, 'enqueue' | 'handle'>
@@ -94,6 +94,12 @@ export function mandateInstructions(mandate: Pick<Mandate, 'strength'>): string 
     + 'internal to one module within the accepted rule scope. If it requires public-interface or behavior changes, new interaction, product '
     + 'decisions or clarification, stop and report dropped; do not expand scope.' : ''
 }
+/**
+ * The note a ticket records when the roster agent it was accepted for no longer exists at launch, so the built-in worker
+ * runs instead. It is a note Input on the ticket, delivered to the worker and shown on the ticket's detail page.
+ */
+const assigneeFallbackNote = (assignee: string): string =>
+  `The roster agent \`${assignee}\` this ticket was accepted for no longer exists, so the built-in worker runs instead.`
 /** Builds a newly accepted ticket's Execution metadata: its worktree name, workspace directory, and assignment text. */
 export function ticketExecution(ticket: Ticket, outcome: Extract<AssessmentOutcome, { kind: 'accept' }>, settings: Settings,
   stateDir: string): Execution {
@@ -462,6 +468,8 @@ export class DshExecutor implements Executor {
     // P1: a ticket accepted for a named agent runs with that agent's preset and model, so routing changes what actually
     // runs. An assignee the configuration no longer has, or a preset that no longer exists, keeps the built-in worker.
     const assigned = assignedAgent(this.host.store, ticket.execution?.assignee)
+    // The agent the ticket was accepted for but the roster no longer has; launch records it so the fallback is not silent.
+    const missing = assigned ? undefined : ticket.execution?.assignee
     const ensureWorker = (options: { preset?: string; model?: RoleModel | null }) =>
       this.host.sessions.ensure(sessionId, workspace, ticket.title, 'worker', options)
     const options = assigned ? { preset: assigned.preset, model: assigned.model } : {}
@@ -501,6 +509,18 @@ export class DshExecutor implements Executor {
       () => { if (!current()) throw new Error('Launch authorization changed before worker delivery') },
       () => { this.host.engine.assignmentStarted(ticket.id, assignment.id) })
     this.host.engine.assignmentStarted(ticket.id, assignment.id)
+    if (missing) this.noteAssigneeFallback(ticket.id, missing)
+  }
+  /**
+   * Records, once, that the ticket's accepted roster agent left the roster before its worker launched, so the built-in
+   * worker ran instead: a note Input on the ticket, which the worker receives and the ticket's detail page shows.
+   */
+  private noteAssigneeFallback(ticketId: string, assignee: string): void {
+    const stored = this.host.store.tickets.get(ticketId)
+    if (!stored || !liveTicket(stored)) return
+    const text = assigneeFallbackNote(assignee)
+    if (stored.inputs.some(input => input.kind === 'note' && input.text === text)) return
+    this.host.engine.note(ticketId, text)
   }
   /** Returns the stored ticket for `agent` when it is a worker session, or undefined otherwise. */
   private ticketOf(agent: Agent): Ticket | undefined {

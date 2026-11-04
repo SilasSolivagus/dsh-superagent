@@ -10,6 +10,7 @@ import { z } from 'zod'
 import type { Store } from './store.ts'
 import { KV } from '../kv.ts'
 import { RoleModelSchema } from '../policy.ts'
+import { key } from '../core/index.ts'
 
 /** The kind of change a request actually asks for, judged from the request itself, not from its wording. */
 export const WORK_TYPES = ['copy', 'visual', 'bugfix', 'refactor', 'test', 'docs', 'infra', 'review', 'other'] as const
@@ -87,6 +88,8 @@ export interface ShadowRecord {
   workType: WorkType | null
   suggestion: Suggestion
   enabled: boolean
+  /** Fingerprint of the configuration the suggestion was computed against, so a later read can tell whether it still holds. */
+  configFingerprint: string
 }
 
 /** Read the stored configuration, falling back to the single default agent when it is absent or unreadable. */
@@ -97,6 +100,25 @@ export function loadConfig(store: Pick<Store, 'get'>): { config: AssigneesConfig
   // A broken configuration must not block startup: keep today's behaviour and report why.
   if (!parsed.success) return { config: defaultConfig(), error: parsed.error.issues[0]?.message ?? 'invalid' }
   return { config: parsed.data }
+}
+
+/**
+ * A stable fingerprint of the routing configuration: the same roster always yields the same value, and any change
+ * (a different agent, capability, scope, capacity or cost, or toggling `enabled`) yields a different one. A shadow
+ * record stores it so a later read can compare it against the fingerprint of the current configuration and tell
+ * whether the recorded suggestion is still explained by today's roster.
+ */
+export function configFingerprint(config: AssigneesConfig): string {
+  // Canonicalise each agent to a fixed field order, so key order in the stored JSON cannot change the fingerprint.
+  return key(JSON.stringify({
+    version: config.version,
+    enabled: config.enabled,
+    agents: config.agents.map(agent => ({
+      id: agent.id, preset: agent.preset ?? null,
+      model: agent.model ? [agent.model.provider, agent.model.model, agent.model.reasoningEffort ?? null] : null,
+      skills: agent.skills, scopes: agent.scopes, concurrency: agent.concurrency, cost: agent.cost,
+    })),
+  }))
 }
 
 /** Whether `agent` may take `workType` and this `repo`. */
@@ -229,7 +251,8 @@ export function recordShadow(store: Pick<Store, 'get' | 'set' | 'keys' | 'delete
   const { config } = loadConfig(store)
   const record: ShadowRecord = { at: (input.now ?? new Date()).toISOString(), decisionId: input.decisionId,
     ...(input.ticketId ? { ticketId: input.ticketId } : {}), workType: input.workType,
-    suggestion: suggest(input.workType, config, new Map(), input.repo), enabled: config.enabled }
+    suggestion: suggest(input.workType, config, new Map(), input.repo), enabled: config.enabled,
+    configFingerprint: configFingerprint(config) }
   store.set(KV.assignees.shadow(input.decisionId), record)
   pruneShadow(store)
   return record

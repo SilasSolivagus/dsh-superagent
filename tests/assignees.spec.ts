@@ -46,6 +46,20 @@ it('returns a copy of the default, so a caller cannot change what a later loadCo
   expect(loadConfig(store).config).toEqual(DEFAULT_CONFIG)
 })
 
+it('falls back to the default configuration when the stored record has an unknown version', () => {
+  const store = new Store(join(directory, 'orchestrator.sqlite'))
+  // A record written by a later build: every field is valid, but this build only knows version 1.
+  store.set(KV.assignees.config, { version: 2, enabled: true, agents: [agent('default-worker')] })
+  // A version we cannot read must not block startup, so loading it must not throw.
+  const load = () => loadConfig(store)
+  expect(load).not.toThrow()
+  const loaded = load()
+  expect(loaded.config).toEqual(DEFAULT_CONFIG)
+  // Routing stays off: an unreadable configuration must never be taken as an opt-in.
+  expect(loaded.config.enabled).toBe(false)
+  expect(loaded.error).toBeTruthy()
+})
+
 it('records the configuration under its own key, never inside settings', () => {
   const store = new Store(join(directory, 'orchestrator.sqlite'))
   store.set(KV.assignees.config, config([agent('default-worker'), agent('ui', { skills: ['visual'] })], true))

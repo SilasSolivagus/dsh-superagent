@@ -260,6 +260,19 @@ it('shows a follow-up that reached a ticket as delivered, the tickets that hande
   expect(triggerView(snapshot(host), store.triggers.get('f2')!).disposition.handbacks[0]?.title).toBe('Fix')
 })
 
+it('shows a ticket\'s assignee only when its execution names one, with whether the roster still has it', () => {
+  const host = views()
+  live('t1')
+  const execution = { name: 't1', directory: '/w/t1', assignment: '' }
+  store.tickets.save({ ...store.tickets.get('t1')!, execution: { ...execution, assignee: 'default-worker' } })
+  expect(ticketDetail(host, 't1')!.assignee).toEqual({ id: 'default-worker', inRoster: true })
+  // The built-in default roster is the only one this store has, so this id is gone.
+  store.tickets.save({ ...store.tickets.get('t1')!, execution: { ...execution, assignee: 'gone-agent' } })
+  expect(ticketDetail(host, 't1')!.assignee).toEqual({ id: 'gone-agent', inRoster: false })
+  store.tickets.save({ ...store.tickets.get('t1')!, execution })
+  expect(ticketDetail(host, 't1')).not.toHaveProperty('assignee')
+})
+
 it('names a bot\'s Mandate as a bot once the Policy no longer lists it', () => {
   const host = views()
   const mandate = { strength: 'inferred' as const, policyVersion: 'v', basis: { via: 'bot' as const,

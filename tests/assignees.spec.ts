@@ -70,6 +70,30 @@ it('prefers the idle agent when two agents cover the same work type', () => {
   expect(cheap.assignee).toBe('b')
 })
 
+it('lets the agent with a better history win between otherwise identical agents, worth 0.5', () => {
+  const cfg = config([agent('default-worker'), agent('a', { skills: ['bugfix'] }), agent('b', { skills: ['bugfix'] })])
+  // Same capability, cost and idle slots: with no history the stable order keeps `a` in front.
+  const baseline = suggest('bugfix', cfg)
+  expect(baseline.assignee).toBe('a')
+  // History breaks that tie: the agent with success rate 1 for this work type wins.
+  const boosted = suggest('bugfix', cfg, new Map(), undefined, id => (id === 'b' ? 1 : 0))
+  expect(boosted.assignee).toBe('b')
+  // The history weight is 0.5, so the winning score rises by exactly that much.
+  expect(boosted.score - baseline.score).toBe(0.5)
+})
+
+it('leaves the existing ranking unchanged when history returns 0', () => {
+  const cfg = config([agent('default-worker'), agent('a', { skills: ['bugfix'], cost: 'low' }), agent('b', { skills: ['bugfix'] })])
+  // Cost already decides this ranking: `a` is cheaper.
+  const baseline = suggest('bugfix', cfg)
+  expect(baseline.assignee).toBe('a')
+  // A zero success rate adds nothing, so neither the winner nor its score moves.
+  expect(suggest('bugfix', cfg, new Map(), undefined, () => 0)).toEqual(baseline)
+  // Among otherwise identical agents, zero history also keeps the stable order rather than reordering it.
+  const twins = config([agent('default-worker'), agent('first', { skills: ['bugfix'] }), agent('second', { skills: ['bugfix'] })])
+  expect(suggest('bugfix', twins, new Map(), undefined, () => 0)).toEqual(suggest('bugfix', twins))
+})
+
 it('respects repository scopes', () => {
   const cfg = config([agent('default-worker'), agent('sandbox', { skills: ['infra'], scopes: ['silas/sandbox'] })])
   expect(suggest('infra', cfg, new Map(), 'silas/sandbox').assignee).toBe('sandbox')

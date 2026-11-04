@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { Store } from '../src/app/store.ts'
 import { KV } from '../src/kv.ts'
-import { DEFAULT_CONFIG, SHADOW_KEEP, loadConfig, readShadow, recordShadow, suggest, type AssigneesConfig } from '../src/app/assignees.ts'
+import { DEFAULT_CONFIG, SHADOW_KEEP, configFingerprint, loadConfig, readShadow, recordShadow, suggest, type AssigneesConfig } from '../src/app/assignees.ts'
 import { agentAllows } from '../src/executor/dsh.ts'
 import { feishu, startRuntime } from './fixtures/host.ts'
 
@@ -232,6 +232,33 @@ it('leaves the shadow records alone while under the cap', () => {
   expect(store.keys('assignees-shadow:')).toHaveLength(2)
   expect(readShadow(store, 'first')).toBeDefined()
   expect(readShadow(store, 'second')).toBeDefined()
+})
+
+it('stamps a shadow record with the fingerprint of the configuration it was computed against', () => {
+  const store = new Store(join(directory, 'orchestrator.sqlite'))
+  const roster = config([agent('default-worker'), agent('ui', { skills: ['visual'] })])
+  store.set(KV.assignees.config, roster)
+  // The same roster produces the same fingerprint, so two records over it can be compared with each other.
+  const first = recordShadow(store, { decisionId: 'd-1', workType: 'visual' })
+  const again = recordShadow(store, { decisionId: 'd-2', workType: 'visual' })
+  expect(first.configFingerprint).toBe(again.configFingerprint)
+  expect(first.configFingerprint).toBe(configFingerprint(roster))
+  // A changed roster changes the fingerprint, so an older record is no longer explained by today's configuration.
+  store.set(KV.assignees.config, { ...roster, agents: [agent('default-worker'), agent('docs-scribe', { skills: ['docs'] })] })
+  const after = recordShadow(store, { decisionId: 'd-3', workType: 'visual' })
+  expect(after.configFingerprint).not.toBe(first.configFingerprint)
+  // The stored fingerprint equals the current configuration's fingerprint, so a later read can judge it stale.
+  expect(after.configFingerprint).toBe(configFingerprint(loadConfig(store).config))
+})
+
+it('treats a toggle of enabled and a roster edit as different configurations', () => {
+  const roster = config([agent('default-worker'), agent('ui', { skills: ['visual'] })])
+  expect(configFingerprint(roster)).not.toBe(configFingerprint({ ...roster, enabled: true }))
+  // Key order of an equivalent agent does not matter: the fingerprint reads fields, not JSON spelling.
+  expect(configFingerprint(roster)).toBe(configFingerprint({
+    version: 1, enabled: false, agents: [{ cost: 'mid', concurrency: 2, scopes: ['*'], skills: ['*'], id: 'default-worker' },
+      { cost: 'mid', concurrency: 2, scopes: ['*'], skills: ['visual'], id: 'ui' }],
+  }))
 })
 
 it('records the work type through the route tool and leaves the ticket unchanged', async () => {

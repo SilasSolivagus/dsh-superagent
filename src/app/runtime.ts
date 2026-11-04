@@ -43,6 +43,7 @@ import { health, type Health, type SourceContext, type SourceHost } from '../sou
 import { Sessions } from './sessions.ts'
 import { Settings } from './settings.ts'
 import { sourceContextOf, type SourceContextDeps } from './source-context.ts'
+import { sweepWorkspaces } from './workspaces.ts'
 import type { ResourceHost } from './resources.ts'
 import { mainTools, type MainToolsHost } from './tools/main.ts'
 import { executorTools, type ExecutorToolsHost } from './tools/executor.ts'
@@ -50,6 +51,8 @@ import { executorTools, type ExecutorToolsHost } from './tools/executor.ts'
 // Source plugins interact with dsh-superagent exclusively through the `SourceHost` service interface.
 declare module '@deepseek-ai/cordis' { interface Context { orchestrator: SourceHost } }
 const now = (): string => new Date().toISOString()
+/** How often ended Tickets' workspace directories are swept (retention is measured in days, so an hour is responsive enough). */
+const WORKSPACE_SWEEP_MS = 60 * 60_000
 
 /**
  * Composition root of dsh-superagent that connects `Store`, `Setup`, `Engine`, `SourceRegistry`, `Effects`, `Outbox`, `Passes`, `Sessions`, `Settings`, `Prompts`, `DshExecutor`, and `MasterAssessor`.
@@ -198,6 +201,20 @@ export class Runtime extends Service implements SourceHost {
   private closing(): boolean { return this.closingFlag }
   /** Hold evaluation, dispatch, and outbound delivery while paused or awaiting setup; sources still record incoming triggers. */
   private paused(): boolean { return !this.setup.configured() || this.store.settings().paused }
+  /** Removes ended Tickets' workspace directories once their retention elapses, then every hour; failures leave the directory for the next sweep. */
+  private startWorkspaceSweep(): void {
+    const sweep = () => {
+      if (this.closing()) return
+      const settings = this.store.settings(), tickets = this.store.tickets.list()
+      void sweepWorkspaces(tickets, settings, this.machine.stateDir)
+        .then(removed => { for (const directory of removed) this.ctx.logger.info('dsh-superagent removed workspace %s', directory) })
+        .catch((error: unknown) => this.ctx.logger.warn('dsh-superagent could not sweep workspaces: %s', String(error)))
+    }
+    sweep()
+    const timer = setInterval(sweep, WORKSPACE_SWEEP_MS)
+    timer.unref?.()
+    this.disposers.push(() => clearInterval(timer))
+  }
   private async initialize(): Promise<void> {
     // Register management HTTP routes before setup completes so operators can fix setup problems in the UI.
     this.disposers.push(registerHttp(this.ctx, this.httpHost()))
@@ -214,6 +231,7 @@ export class Runtime extends Service implements SourceHost {
     this.executor.resume()
     this.passes.start()
     this.effects.start()
+    this.startWorkspaceSweep()
     this.runtimeHealth.set({ state: 'ready', detail: 'Orchestrator is ready', at: now() })
   }
   private httpHost(): HttpHost {

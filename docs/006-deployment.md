@@ -245,6 +245,32 @@ A database migrated by a newer version cannot be opened by an older one. Rollbac
 
 The worker and router presets move shell commands to the background after 5 seconds. A Session cannot load without its preset. Keep the `dsh-superagent-worker` and `dsh-superagent-router` rows in `cordis.patch.yml` while their Sessions are in use; otherwise resume fails with `agent-preset/not-found`.
 
+## Backup and restore
+
+The state directory's database is one SQLite file, `<stateDir>/orchestrator.sqlite`. It uses WAL mode, so while the process runs, recent commits may still be in `orchestrator.sqlite-wal`; `orchestrator.sqlite-shm` beside it is shared memory. Back it up through SQLite, so the backup includes the WAL.
+
+The database holds the work data and the configuration. The work data is its rows for Triggers, Threads, Tickets, Decisions, the outbox and the effect queue. The configuration and other runtime records are in its `kv` table: the assignee routing configuration `assignees:v1`, the sandbox toggle `relax-self-issue-author`, every saved settings revision and prompt revision, and the Sources' read positions. The other files in the state directory are not database state: setup rewrites `worker-bin` and `worker-gitconfig`, and, by default, `work` holds the Ticket checkouts.
+
+To back up:
+
+1. Stop the process with `scripts/dsh-superagent stop`; the script waits for Executors, and shutdown closes the database.
+2. Run `sqlite3 "<stateDir>/orchestrator.sqlite" ".backup '<path>'"`. The command writes a consistent snapshot to `<path>`, including commits still in the WAL, so the backup is a single file. Do not use `cp` on a running database: the copy can capture a page mid-write or miss the WAL.
+
+To restore:
+
+1. Stop the process.
+2. Replace the database, and remove the files that belonged to it:
+
+   ```sh
+   mv "<stateDir>/orchestrator.sqlite" "<stateDir>/orchestrator.sqlite.before-restore"
+   rm -f "<stateDir>/orchestrator.sqlite-wal" "<stateDir>/orchestrator.sqlite-shm"
+   cp "<path>" "<stateDir>/orchestrator.sqlite"
+   ```
+
+3. Start the process with `scripts/dsh-superagent start`; the database is opened at startup, so the restore takes effect only then.
+
+Rolling back the code does not require wiping the database: `ticket.value` and `decision.value` are raw JSON, so an older build ignores fields it does not know. If the newer build migrated the schema, an older build refuses to start; restore the pre-upgrade backup instead, as the Upgrade section says.
+
 ## Troubleshooting
 
 Setup problems appear on the overview with a link to the fix, in the panel's language; the log and the API show the English text below.

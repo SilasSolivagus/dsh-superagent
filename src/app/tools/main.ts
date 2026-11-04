@@ -53,13 +53,14 @@ const RouteItemSchema = z.object({
   worktree_name: z.string().nullish().describe(`accept: ${WorktreeNameSchema.description ?? ''}`),
   acknowledgement: z.string().nullish().describe(`accept: one brief sentence of at most ${IM_WORDS} words naming the concrete change and intended result in the source language. It is posted as a reply to the original source on acceptance, so do not quote the source; quote an earlier proposal briefly only when the trigger merely confirms it and the sentence does not already state it. No generic I will handle it.`),
   note: z.string().nullish().describe(`accept and attach: ${RoutingNoteSchema.description ?? ''}`),
-  work_type: z.enum(WORK_TYPES).nullish().describe(`accept: the kind of change the original request actually needs, judged from the request itself rather than from the words the sender used. One of: ${WORK_TYPES.join(', ')}. Give it on every accept.`),
+  work_type: z.enum(WORK_TYPES).nullish().describe(`accept only: the kind of change the original request actually needs, judged from the request itself rather than from the words the sender used. One of: ${WORK_TYPES.join(', ')}. Give it on every accept; attach, stop and ignore must omit it, and an item of those kinds that carries it is refused.`),
   reason: z.string().nullish().describe('ignore and stop: why, at most 500 characters; an ignore needs it.'),
 }).strict()
 type RouteItem = z.infer<typeof RouteItemSchema>
 type Kind = RouteItem['kind']
 type Field = Exclude<keyof RouteItem, 'kind' | 'trigger_id'>
-/** Each field's check, the kinds whose items read it and those that need it; an item of another kind leaves it unread. */
+/** Each field's check, the kinds whose items read it and those that need it; an item of another kind leaves it unread,
+ * except a work_type carrying a value, which `invalid` refuses rather than drops. */
 const FIELDS: Record<Field, { check: z.ZodType; reads: readonly Kind[]; needs: readonly Kind[] }> = {
   ticket_id: { check: z.string(), reads: ['attach', 'stop'], needs: ['attach', 'stop'] },
   title: { check: z.string().max(200), reads: ['accept'], needs: ['accept'] },
@@ -69,7 +70,8 @@ const FIELDS: Record<Field, { check: z.ZodType; reads: readonly Kind[]; needs: r
   note: { check: RoutingNoteSchema, reads: ['accept', 'attach'], needs: [] },
   reason: { check: z.string().max(500), reads: ['ignore', 'stop'], needs: ['ignore'] },
 }
-/** Why an item cannot run: a field its kind needs is missing, or one it reads breaks its limit. */
+/** Why an item cannot run: a field its kind needs is missing, one it reads breaks its limit, or it carries a work_type its
+ * kind does not read. */
 function invalid(item: RouteItem): string | undefined {
   for (const [field, { check, reads, needs }] of Object.entries(FIELDS) as [Field, typeof FIELDS[Field]][]) {
     const value = item[field]
@@ -80,6 +82,12 @@ function invalid(item: RouteItem): string | undefined {
     }
     const checked = check.safeParse(value)
     if (!checked.success) return `${field}: ${checked.error.issues[0]?.message ?? 'invalid'}`
+  }
+  // A work_type on another kind used to be dropped without a trace, which made the model believe it had conveyed it. Refuse
+  // the item instead, in the same call that carried it, and name the kind that reads the field. An explicit null carries no
+  // value and stays unread, like the other fields of another kind.
+  if (item.kind !== 'accept' && item.work_type !== undefined && item.work_type !== null) {
+    return 'work_type is only read by accept; remove it'
   }
   return undefined
 }

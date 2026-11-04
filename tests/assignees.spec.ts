@@ -72,11 +72,30 @@ it('names the default agent when nothing can be matched', () => {
   const cfg = config([agent('default-worker'), agent('migration', { skills: ['refactor'] })])
   expect(suggest(null, cfg).assignee).toBe('default-worker')
   expect(suggest(null, cfg).fallback).toBe('lowConfidence')
+  // The fallback records both the rule that chose it and the agent it names, for a later read.
+  expect(suggest(null, cfg).evidence).toEqual(['fallback:default-worker', 'agent:default-worker'])
   // The wildcard default agent can take anything, so an uncovered work type still resolves to it.
   expect(suggest('docs', cfg)).toEqual({ assignee: 'default-worker', score: 0, evidence: ['only:default-worker'], fallback: 'single' })
-  // Without a wildcard, an uncovered work type has no capability at all.
-  const specialistOnly = config([agent('ui', { skills: ['visual'] })])
-  expect(suggest('docs', specialistOnly).fallback).toBe('noCapability')
+})
+
+it('falls back to an agent that exists when the roster has no default-worker', () => {
+  // A roster of one narrow specialist: naming a hard-coded default-worker would name an absent agent.
+  const specialistOnly = config([agent('docs-scribe', { skills: ['docs'], cost: 'low' })])
+  const result = suggest('bugfix', specialistOnly)
+  expect(result).toEqual({ assignee: 'docs-scribe', score: 0, evidence: ['fallback:first-agent', 'agent:docs-scribe'], fallback: 'noCapability' })
+  // The fallback still applies when the work type itself is unknown.
+  expect(suggest(null, specialistOnly).assignee).toBe('docs-scribe')
+})
+
+it('prefers a wildcard agent, then the first agent, when default-worker is absent', () => {
+  // A wildcard can take any work type, so it is the closest stand-in for the default worker.
+  const withWildcard = config([agent('docs-scribe', { skills: ['docs'] }), agent('all-rounder'), agent('ui', { skills: ['visual'] })])
+  expect(suggest(null, withWildcard)).toEqual({ assignee: 'all-rounder', score: 0,
+    evidence: ['fallback:first-wildcard', 'agent:all-rounder'], fallback: 'lowConfidence' })
+  // With no wildcard either, the first agent in the configured order is the only honest choice left.
+  const specialists = config([agent('ui', { skills: ['visual'] }), agent('docs-scribe', { skills: ['docs'] })])
+  expect(suggest('bugfix', specialists)).toEqual({ assignee: 'ui', score: 0,
+    evidence: ['fallback:first-agent', 'agent:ui'], fallback: 'noCapability' })
 })
 
 it('picks a single qualified agent without ranking', () => {
@@ -109,7 +128,8 @@ it('does not let out-of-range history push a weak match past the fallback thresh
   // Both candidates are one slot from capacity and expensive, so a legitimate rate keeps them below 2.
   const cfg = config([agent('wild-a', { cost: 'high', concurrency: 16 }), agent('wild-b', { cost: 'high', concurrency: 16 })])
   const load = new Map([['wild-a', 15], ['wild-b', 15]])
-  expect(suggest('docs', cfg, load, undefined, () => 5)).toMatchObject({ assignee: 'default-worker', fallback: 'lowConfidence' })
+  expect(suggest('docs', cfg, load, undefined, () => 5)).toEqual({ assignee: 'wild-a', score: 0,
+    evidence: ['fallback:first-wildcard', 'agent:wild-a'], fallback: 'lowConfidence' })
 })
 
 it('scores an explicit skill above the wildcard fallback when an agent lists both', () => {

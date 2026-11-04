@@ -110,6 +110,16 @@ it('does not let out-of-range history push a weak match past the fallback thresh
   const cfg = config([agent('wild-a', { cost: 'high', concurrency: 16 }), agent('wild-b', { cost: 'high', concurrency: 16 })])
   const load = new Map([['wild-a', 15], ['wild-b', 15]])
   expect(suggest('docs', cfg, load, undefined, () => 5)).toMatchObject({ assignee: 'default-worker', fallback: 'lowConfidence' })
+
+it('scores an explicit skill above the wildcard fallback when an agent lists both', () => {
+  // Two wildcard-only agents both score the wildcard fallback.
+  const wildcard = suggest('visual', config([agent('left'), agent('right')]))
+  // One of the same pair names `visual` explicitly: its explicit hit must outrank the fallback, not be hidden by it.
+  const explicit = suggest('visual', config([agent('left'), agent('right', { skills: ['*', 'visual'] })]))
+  expect(explicit.assignee).toBe('right')
+  expect(explicit.score).toBeGreaterThan(wildcard.score)
+  // For work it does not name, the same agent still falls back to the wildcard score.
+  expect(suggest('docs', config([agent('left'), agent('right', { skills: ['*', 'visual'] })])).score).toBe(wildcard.score)
 })
 
 it('prefers the idle agent when two agents cover the same work type', () => {

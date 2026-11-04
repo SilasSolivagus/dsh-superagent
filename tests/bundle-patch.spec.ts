@@ -51,6 +51,27 @@ it('defines the worker preset Executor Sessions run under, with a shell that mov
     '@deepseek-ai/dsh-tool-workflow', '@deepseek-ai/dsh-workflow-ptc']) expect(names).not.toContain(name)
 })
 
+it('defines the docs preset without a shell or subagents, so a documentation worker cannot reach a shell through a subagent', async () => {
+  const rows = await patched()
+  const docs = presetOf(rows, 'dsh-superagent-worker-docs')
+  expect(docs.id).toBe('dsh-superagent-worker-docs')
+  expect(docs.order).toBe(89)
+  const plugins = flat(docs.plugins)
+  const named = (name: string) => plugins.filter(row => row.name === name).map(row => row.config)
+  // The shell tools stay but are disabled, so the worker cannot run commands.
+  expect(plugins.filter(row => row.name === '@deepseek-ai/dsh-tool-bash').map(row => row.disabled)).toEqual([true])
+  expect(plugins.filter(row => row.name === '@deepseek-ai/dsh-tool-pwsh').map(row => row.disabled)).toEqual([true])
+  // No subagent tools: a spawned subagent runs under `standard` (which has a shell), so delegation would re-open the shell.
+  const names = plugins.map(row => row.name)
+  expect(names).not.toContain('@deepseek-ai/dsh-tool-subagent')
+  expect(names).not.toContain('@deepseek-ai/dsh-tool-subagent-control')
+  // It keeps the file, search and skill tools documentation work needs.
+  for (const name of ['@deepseek-ai/dsh-tool-fs', '@deepseek-ai/dsh-tool-fs-search', '@deepseek-ai/dsh-tool-skill',
+    '@deepseek-ai/dsh-skill-filesystem', '@deepseek-ai/dsh-agent-instructions', '@deepseek-ai/dsh-compaction-basic']) {
+    expect(named(name).length, name).toBeGreaterThan(0)
+  }
+})
+
 it('defines the router preset the main Session runs under: the worker\'s 5-second shell and job waits, and only the tools it uses', async () => {
   const rows = await patched()
   const router = presetOf(rows, ROUTER_PRESET), worker = presetOf(rows, WORKER_PRESET)

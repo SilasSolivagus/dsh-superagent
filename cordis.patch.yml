@@ -123,7 +123,7 @@
       config:
         id: dsh-superagent-worker-docs
         name: dsh-superagent 文档执行器
-        description: dsh-superagent 的执行器 Session 专用，不供手动选择。没有 shell 和后台任务：文档活只改文件、跑不了命令，破坏面更小。
+        description: dsh-superagent 的执行器 Session 专用，不供手动选择。没有 shell、后台任务和子代理：文档活只改文件、跑不了命令，破坏面更小。
         order: 89
         plugins:
           - id: persona
@@ -194,22 +194,8 @@
                   thresholdChars: 8192
                   headChars: 4096
                   tailChars: 1024
-          - id: delegation
-            name: cordis:group
-            group: true
-            isolate:
-              workflowEngine: true
-            config:
-              - id: tool-subagent-control
-                name: '@deepseek-ai/dsh-tool-subagent-control'
-              - id: tool-subagent
-                name: '@deepseek-ai/dsh-tool-subagent'
-                config:
-                  provider: spawn
-                  toolName: subagent
-                  modelSelection: true
-                  modelDiscovery: true
-                  agentPreset: standard
+          # No subagent tools: DSH's spawn provider runs each subagent under the preset the tool names (`standard`, which
+          # has a shell), so delegation would re-open the shell this preset closes. Documentation work has no use for it.
           - id: tool-todo
             name: '@deepseek-ai/dsh-tool-todo'
             config:

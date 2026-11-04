@@ -2,6 +2,8 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { AssigneesConfigSchema, DEFAULT_CONFIG, loadConfig } from '../src/app/assignees.ts'
+import type { Store } from '../src/app/store.ts'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const NUMBERED = /^(\d{3})-[a-z0-9-]+\.md$/
@@ -14,6 +16,18 @@ function links(file: string): string[] {
 }
 const files = (directory: string): string[] => readdirSync(join(ROOT, directory), { recursive: true, withFileTypes: true })
   .filter(entry => entry.isFile()).map(entry => relative(ROOT, join(entry.parentPath, entry.name)))
+/** Parse the JSON block under `## <heading>` in a document, so an example copied from the docs is checked as a fixture. */
+function jsonBlock(file: string, heading: string): unknown {
+  const lines = read(file).split('\n')
+  const start = lines.indexOf(`## ${heading}`)
+  if (start < 0) throw new Error(`${file} has no ## ${heading} section`)
+  const next = lines.findIndex((line, index) => index > start && line.startsWith('## '))
+  const section = lines.slice(start, next < 0 ? undefined : next)
+  const fence = section.indexOf('```json')
+  const end = fence < 0 ? -1 : section.indexOf('```', fence + 1)
+  if (end < 0) throw new Error(`${file} has no JSON block under ## ${heading}`)
+  return JSON.parse(section.slice(fence + 1, end).join('\n'))
+}
 /**
  * Extract repo-relative file paths from the first column of a table under `## <heading>` in `docs/007-architecture.md`.
  * Bare filenames inherit the directory of the preceding path in the same cell.
@@ -54,6 +68,13 @@ describe('documentation', () => {
   })
   it('leaves no merge conflict markers in any document', () => {
     expect(documents.filter(path => /^(<{7}|>{7}) /m.test(read(path)))).toEqual([])
+  })
+  it('keeps the README assignee routing example an exact, loadable copy of the default', () => {
+    const example = jsonBlock('README.md', 'Assignee routing')
+    // The example is the built-in default record: a renamed, missing or extra field fails here, not at load time.
+    expect(AssigneesConfigSchema.parse(example)).toEqual(DEFAULT_CONFIG)
+    // Loading the stored example returns it unchanged; a fallback would carry an `error` and the default instead.
+    expect(loadConfig({ get: () => example } as unknown as Pick<Store, 'get'>)).toEqual({ config: DEFAULT_CONFIG })
   })
   it('lists every module of src in the module table of 007 Architecture, and only files that exist', () => {
     const modules = listed('Modules')

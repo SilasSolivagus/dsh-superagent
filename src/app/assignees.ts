@@ -112,7 +112,7 @@ const clampRate = (value: number): number => (Number.isFinite(value) ? Math.min(
 /**
  * Weights for the four signals `suggest` ranks on. They only order candidates that already passed the
  * capability, scope and capacity filters, so tuning them changes routing preference, never eligibility.
- * The values are relative to each other and are compared against the absolute `MIN_SCORE`.
+ * The values are relative to each other; their weighted sum is compared against the absolute `MIN_SCORE`.
  */
 const WEIGHTS = {
   /**
@@ -144,18 +144,25 @@ const WEIGHTS = {
 } as const
 
 /**
- * Confidence floor for assigning a candidate instead of falling back. A candidate
- * that names the work type clears it on capability alone (3 points); a wildcard candidate starts at
- * 0.75 and needs at least 1.25 more from load, cost and history. Raising it makes routing more
- * conservative (above 3 it would also reject specialists); lowering it routes to weaker matches.
+ * Confidence floor for assigning a candidate instead of falling back. A candidate that names the work type
+ * clears it on capability alone (3 points); a wildcard candidate starts at 0.75 and needs at least 1.25 more
+ * from load, cost and history. Raising it makes routing more conservative: above 3 it also rejects a
+ * specialist that is nearly full, expensive and without history, because only those three can lift its base
+ * score higher; lowering it routes to weaker matches.
  */
 const MIN_SCORE = 2
 
 /**
- * Choose an executor for one work type: hard-filter on capability and free slots, then rank by capability
- * coverage, free capacity, cost and history. Anything unqualified falls back to an agent that exists in
- * the roster rather than failing, so a ticket never waits on a routing decision.
- * @param load - how many tickets each agent already holds, by agent id.
+ * Choose an executor for one work type. Hard-filter on capability, repository scope and free slots, then rank
+ * the survivors by the weighted sum of the four signals in `WEIGHTS`: capability 3, free capacity 2, cost 1
+ * and history 0.5. A candidate that names the work type therefore leads a wildcard agent by 2.25 points
+ * before load, cost and history, and a perfect score is 6.5. A lone qualifier is returned without ranking;
+ * otherwise the best score is used only if it reaches `MIN_SCORE` (2), which capability alone clears for a
+ * specialist, while a wildcard candidate needs 1.25 more from load, cost or history. Cases where ranking
+ * cannot pick a specialist fall back to an agent that exists in the roster rather than failing, so a ticket
+ * never waits on a routing decision; `Suggestion.fallback` records which rule chose the fallback.
+ * @param load - how many tickets each agent already holds, by agent id; an agent at its `concurrency` is skipped.
+ * @param repo - the repository the work is in, matched against each agent's `scopes`.
  * @param history - an optional success rate per agent for this work type; a value outside [0, 1] is clamped to that range.
  */
 export function suggest(workType: WorkType | null, config: AssigneesConfig, load: ReadonlyMap<string, number> = new Map(),

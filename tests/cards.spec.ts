@@ -171,20 +171,21 @@ it('shows a ticket card\'s state from a closed set: the open ticket\'s stage, th
   expect(ticketCard(ticket)).not.toHaveProperty('attention')
   expect(ticketCard({ ...ticket, attention: { id: 'q', question: 'Desktop too?' } })).toMatchObject({ attention: { question: 'Desktop too?' } })
 })
-it('keeps a ticket card\'s key set fixed, with no assignee of its own', () => {
-  // The card is a model-facing projection: an execution's directory and assignee stay behind the ticket's resources.
+it('keeps a ticket card\'s key set fixed and carries an assignee only when its execution names one', () => {
+  // The card is a model-facing projection: an execution's directory stays behind the ticket's resources, while the
+  // assignee is part of what the card shows. Adding a key here must be an explicit change to this expectation.
   const execution = { name: 'ticket-1', directory: '/worktrees/ticket-1', assignment: 'Inspect the check.' }
   const unassigned: Ticket = { ...ticket, execution }
   const keys = ['ticket_id', 'title', 'state', 'strength', 'pr_number', 'preview', 'read']
   expect(unassigned.execution?.directory).toBe('/worktrees/ticket-1')
   expect(unassigned.execution).not.toHaveProperty('assignee')
   expect(Object.keys(ticketCard(unassigned))).toEqual(keys)
+  expect(ticketCard(unassigned)).not.toHaveProperty('assignee')
   expect(JSON.stringify(ticketCard(unassigned))).not.toContain('assignee')
-  // An execution may name the roster agent that runs the ticket, but the card's shape stays the same: giving the card an
-  // assignee field must be an explicit change to this expectation, not something a routing change lets happen silently.
+  // An execution that names the roster agent adds exactly that one key, and no null placeholder otherwise.
   const assigned: Ticket = { ...ticket, execution: { ...execution, assignee: 'docs-scribe' } }
-  expect(Object.keys(ticketCard(assigned))).toEqual(keys)
-  expect(JSON.stringify(ticketCard(assigned))).not.toContain('assignee')
+  expect(Object.keys(ticketCard(assigned))).toEqual([...keys.slice(0, 4), 'assignee', ...keys.slice(4)])
+  expect(ticketCard(assigned)).toMatchObject({ assignee: 'docs-scribe' })
 })
 it('shows a decision with snake_case keys and a reference to its details', () => {
   const decision: Decision = { id: 'd1', evalId: 'e1', threadKey: 'github:42', triggerIds: ['request-1'], policyVersion: 'v1', at: 'a', kind: 'accept', reason: [said('r')],

@@ -67,6 +67,16 @@ it('decodes path parameters and parses each route\'s query', async () => {
   expect(seen).toEqual(['feishu:oc_1:om/root', { filter: { kinds: ['accept', 'reopen'], since: expect.any(String) }, offset: 0, limit: 200 }])
 })
 
+it('lists the recent shadow routing records the panel reads, without changing any of them', async () => {
+  // The route reads the shadow family, stamps staleness against the current configuration, and writes nothing.
+  const record = { at: '2026-11-04T00:00:00.000Z', decisionId: 'd1', workType: 'docs', enabled: false,
+    suggestion: { assignee: 'docs-scribe', score: 0, evidence: ['only:docs-scribe'], fallback: 'single' }, configFingerprint: 'old' }
+  const call = serve({ store: { keys: (family: { prefix: string }) => [`${family.prefix}d1`],
+    get: (key: string) => key === 'assignees-shadow:d1' ? record : undefined } })
+  expect(await call('GET', 'assignees/shadow')).toEqual({ status: 200, body: { items: [
+    { at: record.at, decisionId: 'd1', workType: 'docs', assignee: 'docs-scribe', fallback: 'single', stale: true }] } })
+})
+
 it('answers only a same-origin request from the panel on the loopback address', async () => {
   const call = serve({ sessions: { delivery: async () => 'injected' }, engine: { unsubscribe: () => true } })
   const post = (headers: Headers) => call('POST', 'threads/github%3A1/unsubscribe', undefined, headers)

@@ -40,6 +40,38 @@ it('lists Tickets under Execution by who they wait on, with the Executor state a
   expect(server.settings).toMatchObject({ paused: true, executor: { maxWorkers: 4 } })
 })
 
+it('lists the newest shadow routing suggestions under Execution, marking a configuration that changed since', async () => {
+  server.shadows = [
+    { at: '2026-09-23T00:00:00Z', decisionId: 'd2', ticketId: 't1', workType: 'visual', assignee: 'ui', fallback: 'lowConfidence',
+      stale: true },
+    { at: '2026-09-22T00:00:00Z', decisionId: 'd1', workType: null, assignee: 'default-worker', stale: false },
+  ]
+  await mount()
+  await click(zh['tab.execution'])
+  expect(server.requests.some(request => request.path === 'assignees/shadow')).toBe(true)
+  const rows = all('.dt-section .dt-table tbody tr').map(row => [...row.querySelectorAll('td')].map(cell => cell.textContent))
+  expect(rows).toHaveLength(2)
+  expect(rows[0]).toEqual([expect.stringMatching(/\S/), zh['workType.visual'], 'ui', zh['fallback.lowConfidence'], zh.shadowStale])
+  expect(rows[1]).toEqual([expect.stringMatching(/\S/), zh.shadowNoWorkType, 'default-worker', zh.shadowRanking, zh.shadowCurrent])
+  await remount(en)
+  const english = all('.dt-section .dt-table tbody tr').map(row => [...row.querySelectorAll('td')].map(cell => cell.textContent))
+  expect(english[0]).toEqual([expect.stringMatching(/\S/), en['workType.visual'], 'ui', en['fallback.lowConfidence'], en.shadowStale])
+})
+
+it('shows the assignee a Ticket runs with, and says whether the roster still names it', async () => {
+  const t1 = server.ticketDetails.t1!
+  server.ticketDetails.t1 = { ...t1, assignee: { id: 'docs-scribe', inRoster: false } }
+  at({ page: 'execution', id: 't1' })
+  await mount()
+  const fields = () => all('.dt-status-line .dt-lv').map(item => item.textContent)
+  expect(fields()).toContain(`${zh.ticketAssigneeLabel} docs-scribe ${zh.assigneeMissing}`)
+  server.ticketDetails.t1 = { ...t1, assignee: { id: 'docs-scribe', inRoster: true } }
+  await remount(en)
+  expect(fields()).toContain(`${en.ticketAssigneeLabel} docs-scribe ${en.assigneeInRoster}`)
+  await remount(zh)
+  expect(fields()).toContain(`${zh.ticketAssigneeLabel} docs-scribe ${zh.assigneeInRoster}`)
+})
+
 it('stops an open Ticket from its page after confirmation', async () => {
   await mount()
   await click('修复回归')

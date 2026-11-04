@@ -124,6 +124,7 @@ export type SourceView = SettingsView['sources'][number]
 export type SourceStatusRow = ApiResponse<'GET sources'>[number]
 export type TicketRow = ApiResponse<'GET tickets'>['items'][number]
 export type TicketPageView = ApiResponse<'GET tickets/:id'>
+export type ShadowRow = ApiResponse<'GET assignees/shadow'>['items'][number]
 export type ThreadRow = ApiResponse<'GET threads'>['items'][number]
 export type ThreadPageView = ApiResponse<'GET threads/:key'>
 export type TriggerRow = ThreadPageView['timeline'][number]

@@ -20,7 +20,7 @@ The tabs follow the workflow: **Overview**, **Source**, **Trigger**, **Eval**, *
 | Source | Source state, setup problems and non-zero counts. Filtered Triggers and dropped messages cover the same 24-hour window as Overview |
 | Trigger | Threads filtered by Subscribed, Evaluating, New Triggers in 24 h, or All Threads. Each Thread shows its Triggers newest first, Decisions and Subscriptions |
 | Eval | Decisions with their reason and matched rules |
-| Execution | Executor state, Pause processing, and Tickets filtered by Open, Pending, Working, Waiting for a Trigger or Ended. Ticket details show actions, authorization, waiting Inputs, Subscriptions and Assignments |
+| Execution | Executor state, Pause processing, the last 20 shadow routing suggestions, and Tickets filtered by Open, Pending, Working, Waiting for a Trigger or Ended. Ticket details show actions, authorization, the assignee and whether the roster still names it, waiting Inputs, Subscriptions and Assignments |
 | Settings | Sources, Eval, Execution, Prompts and Deployment. Each group includes its save history |
 
 ### Reading individual records
@@ -49,7 +49,9 @@ Search also finds Threads by references such as `#12` or a GitHub URL, and Ticke
 
 ## Known limits
 
-The panel does not show the assignee that routing suggests for a Ticket, and it does not support manual reassignment. An explicit accept writes the suggestion to the state database (`<stateDir>/orchestrator.sqlite`, table `kv`; `<stateDir>` is the state directory under **Settings → Deployment**) as `assignees-shadow:<decisionId>`, and that record is currently the only place to read it.
+The panel shows the assignee a Ticket runs with, whether the roster still names it, and the last 20 shadow records under **Execution**, but it does not support manual reassignment.
+
+An explicit accept writes its suggestion to the state database (`<stateDir>/orchestrator.sqlite`, table `kv`; `<stateDir>` is the state directory under **Settings → Deployment**) as `assignees-shadow:<decisionId>`. The panel reads those records; they can also be read directly.
 
 To read one record:
 
@@ -58,7 +60,7 @@ sqlite3 "<stateDir>/orchestrator.sqlite" \
   "SELECT value FROM kv WHERE key = 'assignees-shadow:<decisionId>';"
 ```
 
-The value is JSON with `at`, `decisionId`, `ticketId`, `workType`, `suggestion` (`assignee`, `score`, `evidence` and an optional `fallback`) and `enabled`. To list recent records when the Decision ID is not at hand:
+The value is JSON with `at`, `decisionId`, `ticketId`, `workType`, `suggestion` (`assignee`, `score`, `evidence` and an optional `fallback`), `enabled` and `configFingerprint`. To list recent records when the Decision ID is not at hand:
 
 ```sh
 sqlite3 "<stateDir>/orchestrator.sqlite" \
@@ -67,7 +69,7 @@ sqlite3 "<stateDir>/orchestrator.sqlite" \
     ORDER BY json_extract(value, '$.at') DESC LIMIT 20;"
 ```
 
-Showing the suggestion in the panel and supporting manual reassignment are planned work, not a defect.
+Manual reassignment is planned work, not a defect.
 
 ## Principles
 

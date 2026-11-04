@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest'
 import { Store } from '../src/app/store.ts'
 import { KV } from '../src/kv.ts'
 import { DEFAULT_CONFIG, SHADOW_KEEP, configFingerprint, loadConfig, readShadow, recordShadow, suggest, type AssigneesConfig } from '../src/app/assignees.ts'
+import { SHADOW_SHOWN, shadowList } from '../src/app/views/assignees.ts'
 import { agentAllows } from '../src/executor/dsh.ts'
 import { feishu, startRuntime } from './fixtures/host.ts'
 
@@ -261,6 +262,30 @@ it('stamps a shadow record with the fingerprint of the configuration it was comp
   expect(after.configFingerprint).not.toBe(first.configFingerprint)
   // The stored fingerprint equals the current configuration's fingerprint, so a later read can judge it stale.
   expect(after.configFingerprint).toBe(configFingerprint(loadConfig(store).config))
+})
+
+it('lists the newest shadow records for the panel, newest first, and marks those today\'s roster no longer explains', () => {
+  const store = new Store(join(directory, 'orchestrator.sqlite'))
+  const roster = config([agent('default-worker'), agent('ui', { skills: ['visual'] })])
+  store.set(KV.assignees.config, roster)
+  // More records than the panel shows, written oldest to newest; the first two fall outside the newest SHADOW_SHOWN.
+  for (let i = 0; i < SHADOW_SHOWN + 2; i++) recordShadow(store, { decisionId: `d-${i}`, ticketId: i === SHADOW_SHOWN + 1 ? 't-1' : undefined,
+    workType: 'visual', now: new Date(Date.UTC(2026, 0, 1, 0, 0, i)) })
+  const listed = shadowList(store)
+  expect(listed.items).toHaveLength(SHADOW_SHOWN)
+  expect(listed.items[0]).toMatchObject({ decisionId: `d-${SHADOW_SHOWN + 1}`, ticketId: 't-1', workType: 'visual', assignee: 'ui',
+    stale: false })
+  expect(listed.items.at(-1)).toMatchObject({ decisionId: 'd-2', stale: false })
+  expect(listed.items.map(item => item.decisionId)).not.toContain('d-0')
+  // A changed roster leaves older suggestions without a current explanation, while a later record is current again.
+  store.set(KV.assignees.config, config([agent('default-worker'), agent('docs-scribe', { skills: ['docs'] })]))
+  recordShadow(store, { decisionId: 'after', workType: 'docs', now: new Date(Date.UTC(2026, 0, 1, 0, 1)) })
+  const after = shadowList(store).items
+  expect(after[0]).toMatchObject({ decisionId: 'after', workType: 'docs', assignee: 'docs-scribe', stale: false })
+  expect(after.slice(1).every(item => item.stale)).toBe(true)
+  // The view reads only records it can project: an unreadable value is skipped, not rendered as blanks.
+  store.set(KV.assignees.shadow('broken'), { at: '2026-01-01T00:00:00.000Z' })
+  expect(shadowList(store).items.some(item => item.decisionId === 'broken')).toBe(false)
 })
 
 it('treats a toggle of enabled and a roster edit as different configurations', () => {

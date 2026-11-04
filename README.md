@@ -43,7 +43,7 @@ Each agent names the work it can take:
 - `concurrency`: the most Tickets the agent may hold at once, from 1 to 16. A full agent is not considered.
 - `cost`: `low`, `mid` or `high`; a lower cost ranks higher when the other factors are equal.
 
-`preset` and `model` are optional overrides for the Executor Session preset and the model from the execution settings. The router writes each decision to `assignees-shadow:<decisionId>`: the work type, the chosen assignee with its score and evidence, any fallback reason, and whether `enabled` was on when the decision was made. A fallback names an agent that is actually in the roster: `default-worker` when present, otherwise the first agent with a `*` skill, otherwise the first agent. Its evidence records the rule (`fallback:default-worker`, `fallback:first-wildcard` or `fallback:first-agent`) and the chosen id.
+`preset` and `model` are optional overrides for the Executor Session preset and the model from the execution settings. The router writes each decision to `assignees-shadow:<decisionId>`: the work type, the chosen assignee with its score and evidence, any fallback reason, and whether `enabled` was on when the decision was made, and a `configFingerprint` of the configuration it was computed against. Comparing that fingerprint with the fingerprint of the current record answers whether an old suggestion is still explained by today's roster. A fallback names an agent that is actually in the roster: `default-worker` when present, otherwise the first agent with a `*` skill, otherwise the first agent. Its evidence records the rule (`fallback:default-worker`, `fallback:first-wildcard` or `fallback:first-agent`) and the chosen id. The KV keeps only the most recent 100 shadow records and prunes the oldest as new decisions are recorded, so it never grows without bound; pruning keeps the newest records by timestamp, so a record still being read is never removed.
 
 ### Reading the shadow records
 
@@ -81,6 +81,8 @@ sqlite3 -header -column "$db" "
 ```
 
 These records are write-only: `recordShadow` writes one per explicit accept, nothing reads them back into the work path, and the accept continues exactly as before. The queries therefore observe what routing would decide without changing which executor runs the Ticket.
+
+A ticket accepted for an agent that later leaves the roster still launches, but as the built-in worker; the launch records a note on the ticket naming the missing agent, so the fallback is visible on the ticket and to the worker instead of being silent.
 
 ## Documentation
 

@@ -10,6 +10,7 @@ import { z } from 'zod'
 import type { Store } from './store.ts'
 import { KV } from '../kv.ts'
 import { RoleModelSchema } from '../policy.ts'
+import { key } from '../core/index.ts'
 
 /** The kind of change a request actually asks for, judged from the request itself, not from its wording. */
 export const WORK_TYPES = ['copy', 'visual', 'bugfix', 'refactor', 'test', 'docs', 'infra', 'review', 'other'] as const
@@ -87,6 +88,8 @@ export interface ShadowRecord {
   workType: WorkType | null
   suggestion: Suggestion
   enabled: boolean
+  /** Fingerprint of the configuration the suggestion was computed against, so a later read can tell whether it still holds. */
+  configFingerprint: string
 }
 
 /** Read the stored configuration, falling back to the single default agent when it is absent or unreadable. */
@@ -97,6 +100,25 @@ export function loadConfig(store: Pick<Store, 'get'>): { config: AssigneesConfig
   // A broken configuration must not block startup: keep today's behaviour and report why.
   if (!parsed.success) return { config: defaultConfig(), error: parsed.error.issues[0]?.message ?? 'invalid' }
   return { config: parsed.data }
+}
+
+/**
+ * A stable fingerprint of the routing configuration: the same roster always yields the same value, and any change
+ * (a different agent, capability, scope, capacity or cost, or toggling `enabled`) yields a different one. A shadow
+ * record stores it so a later read can compare it against the fingerprint of the current configuration and tell
+ * whether the recorded suggestion is still explained by today's roster.
+ */
+export function configFingerprint(config: AssigneesConfig): string {
+  // Canonicalise each agent to a fixed field order, so key order in the stored JSON cannot change the fingerprint.
+  return key(JSON.stringify({
+    version: config.version,
+    enabled: config.enabled,
+    agents: config.agents.map(agent => ({
+      id: agent.id, preset: agent.preset ?? null,
+      model: agent.model ? [agent.model.provider, agent.model.model, agent.model.reasoningEffort ?? null] : null,
+      skills: agent.skills, scopes: agent.scopes, concurrency: agent.concurrency, cost: agent.cost,
+    })),
+  }))
 }
 
 /** Whether `agent` may take `workType` and this `repo`. */
@@ -197,23 +219,49 @@ export function suggest(workType: WorkType | null, config: AssigneesConfig, load
 }
 
 /**
- * Record what routing would have decided for an accepted ticket, without changing what happens to it.
- * Writes one KV entry per decision; nothing reads it back into the work path.
+ * How many recent shadow records to keep. The record is an audit aid for judging routing before enabling it, so a
+ * bounded window of recent decisions is enough; pruning the oldest keeps the KV from growing without bound. It must
+ * stay comfortably larger than the volume an operator reviews at once, and small enough that storage is trivial.
  */
-export function recordShadow(store: Pick<Store, 'get' | 'set'>, input: { decisionId: string; ticketId?: string; workType: WorkType | null
+export const SHADOW_KEEP = 100
+
+/**
+ * Delete the oldest shadow records beyond `SHADOW_KEEP`, keeping the most recent by their `at` timestamp. Best-effort:
+ * a record without a readable `at` sorts as the oldest. Reading is unaffected because only the newest records are kept,
+ * and the record just written by `recordShadow` is the newest of all, so it is never removed by the prune that follows.
+ */
+function pruneShadow(store: Pick<Store, 'get' | 'keys' | 'delete'>): void {
+  const keys = store.keys(KV.assignees.shadow)
+  if (keys.length <= SHADOW_KEEP) return
+  const prefix = KV.assignees.shadow.prefix
+  const byAge = keys.map(key => {
+    const record = store.get(KV.assignees.shadow(key.slice(prefix.length))) as ShadowRecord | undefined
+    return { key, at: record?.at ?? '' }
+  }).sort((left, right) => left.at.localeCompare(right.at))
+  for (const { key } of byAge.slice(0, byAge.length - SHADOW_KEEP)) store.delete(key)
+}
+
+/**
+ * Record what routing would have decided for an accepted ticket, without changing what happens to it.
+ * Writes one KV entry per decision, then prunes the oldest shadow records beyond `SHADOW_KEEP`; nothing reads them back into the work path.
+ */
+export function recordShadow(store: Pick<Store, 'get' | 'set' | 'keys' | 'delete'>, input: { decisionId: string; ticketId?: string; workType: WorkType | null
   /** The repository the work is in, so a roster scoped to one repository is judged against it. */
   repo?: string; now?: Date }): ShadowRecord {
   const { config } = loadConfig(store)
   const record: ShadowRecord = { at: (input.now ?? new Date()).toISOString(), decisionId: input.decisionId,
     ...(input.ticketId ? { ticketId: input.ticketId } : {}), workType: input.workType,
-    suggestion: suggest(input.workType, config, new Map(), input.repo), enabled: config.enabled }
+    suggestion: suggest(input.workType, config, new Map(), input.repo), enabled: config.enabled,
+    configFingerprint: configFingerprint(config) }
   store.set(KV.assignees.shadow(input.decisionId), record)
+  pruneShadow(store)
   return record
 }
 
 /**
  * The agent a ticket's `execution.assignee` names, or `undefined` when it names none or the configuration no longer
- * has it (an agent the operator removed while its tickets were still running). The caller then keeps today's worker.
+ * has it (an agent the operator removed while its tickets were still running). The caller then keeps today's worker,
+ * and `DshExecutor.launch` records a note on the ticket so the fallback is not silent.
  */
 export function assignedAgent(store: Pick<Store, 'get'>, assignee: string | undefined): Agent | undefined {
   if (!assignee) return undefined

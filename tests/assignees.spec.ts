@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { Store } from '../src/app/store.ts'
 import { KV } from '../src/kv.ts'
-import { DEFAULT_CONFIG, loadConfig, readShadow, recordShadow, suggest, type AssigneesConfig } from '../src/app/assignees.ts'
+import { DEFAULT_CONFIG, SHADOW_KEEP, configFingerprint, loadConfig, readShadow, recordShadow, suggest, type AssigneesConfig } from '../src/app/assignees.ts'
 import { agentAllows } from '../src/executor/dsh.ts'
 import { feishu, startRuntime } from './fixtures/host.ts'
 
@@ -208,6 +208,59 @@ it('records enabled=true and still writes the suggestion', () => {
   expect(readShadow(store, 'decision-enabled')).toEqual(record)
 })
 
+it('prunes the oldest shadow records, keeping the most recent SHADOW_KEEP', () => {
+  const store = new Store(join(directory, 'orchestrator.sqlite'))
+  store.set(KV.assignees.config, config([agent('default-worker')]))
+  // Write past the cap with distinct, increasing timestamps.
+  for (let i = 0; i < SHADOW_KEEP + 5; i++) {
+    recordShadow(store, { decisionId: `d-${i}`, workType: 'docs', now: new Date(Date.UTC(2026, 0, 1, 0, 0, i)) })
+  }
+  const keys = store.keys('assignees-shadow:')
+  expect(keys).toHaveLength(SHADOW_KEEP)
+  // The newest survive, the oldest are gone.
+  expect(readShadow(store, `d-${SHADOW_KEEP + 4}`)).toMatchObject({ decisionId: `d-${SHADOW_KEEP + 4}` })
+  expect(readShadow(store, 'd-0')).toBeUndefined()
+  // The record just written is always among the kept, so a read of it is never interrupted by the prune.
+  expect(readShadow(store, `d-${SHADOW_KEEP + 4}`)).toBeDefined()
+})
+
+it('leaves the shadow records alone while under the cap', () => {
+  const store = new Store(join(directory, 'orchestrator.sqlite'))
+  store.set(KV.assignees.config, config([agent('default-worker')]))
+  recordShadow(store, { decisionId: 'first', workType: 'docs', now: new Date('2026-11-04T00:00:00.000Z') })
+  recordShadow(store, { decisionId: 'second', workType: 'docs', now: new Date('2026-11-04T00:00:01.000Z') })
+  expect(store.keys('assignees-shadow:')).toHaveLength(2)
+  expect(readShadow(store, 'first')).toBeDefined()
+  expect(readShadow(store, 'second')).toBeDefined()
+})
+
+it('stamps a shadow record with the fingerprint of the configuration it was computed against', () => {
+  const store = new Store(join(directory, 'orchestrator.sqlite'))
+  const roster = config([agent('default-worker'), agent('ui', { skills: ['visual'] })])
+  store.set(KV.assignees.config, roster)
+  // The same roster produces the same fingerprint, so two records over it can be compared with each other.
+  const first = recordShadow(store, { decisionId: 'd-1', workType: 'visual' })
+  const again = recordShadow(store, { decisionId: 'd-2', workType: 'visual' })
+  expect(first.configFingerprint).toBe(again.configFingerprint)
+  expect(first.configFingerprint).toBe(configFingerprint(roster))
+  // A changed roster changes the fingerprint, so an older record is no longer explained by today's configuration.
+  store.set(KV.assignees.config, { ...roster, agents: [agent('default-worker'), agent('docs-scribe', { skills: ['docs'] })] })
+  const after = recordShadow(store, { decisionId: 'd-3', workType: 'visual' })
+  expect(after.configFingerprint).not.toBe(first.configFingerprint)
+  // The stored fingerprint equals the current configuration's fingerprint, so a later read can judge it stale.
+  expect(after.configFingerprint).toBe(configFingerprint(loadConfig(store).config))
+})
+
+it('treats a toggle of enabled and a roster edit as different configurations', () => {
+  const roster = config([agent('default-worker'), agent('ui', { skills: ['visual'] })])
+  expect(configFingerprint(roster)).not.toBe(configFingerprint({ ...roster, enabled: true }))
+  // Key order of an equivalent agent does not matter: the fingerprint reads fields, not JSON spelling.
+  expect(configFingerprint(roster)).toBe(configFingerprint({
+    version: 1, enabled: false, agents: [{ cost: 'mid', concurrency: 2, scopes: ['*'], skills: ['*'], id: 'default-worker' },
+      { cost: 'mid', concurrency: 2, scopes: ['*'], skills: ['visual'], id: 'ui' }],
+  }))
+})
+
 it('records the work type through the route tool and leaves the ticket unchanged', async () => {
   const h = await startRuntime()
   try {
@@ -280,4 +333,26 @@ it('lets an agent start only as many tickets as its roster entry allows', () => 
   expect(agentAllows(roster, 1)).toBe(true)
   expect(agentAllows(roster, 2)).toBe(false)        // its own slot is full, so the launch waits
   expect(agentAllows(roster, 3)).toBe(false)
+})
+
+it('records a note on the ticket when the assigned agent left the roster before its worker launched', async () => {
+  const h = await startRuntime()
+  try {
+    const roster = { version: 1, enabled: true, agents: [agent('default-worker'), agent('docs-scribe', { skills: ['docs'], scopes: ['*'] })] }
+    h.runtime.store.set(KV.assignees.config, roster)
+    const first = feishu('31', '@bot README 补一句用途说明')
+    h.runtime.receive(first); await h.runtime.idle()
+    // Accept for docs-scribe while it is still in the roster; the launch is queued but has not run yet.
+    await h.runTool(h.runtime.masterId, 'orchestrator_route', { decisions: [{ kind: 'accept', trigger_id: first.id,
+      title: 'README 补一句', worktree_name: 'readme-note', acknowledgement: '补一句用途说明', work_type: 'docs' }] })
+    const ticket = h.runtime.store.tickets.open().find(item => item.title === 'README 补一句')!
+    expect(ticket.execution?.assignee).toBe('docs-scribe')
+    // Remove docs-scribe from the roster before the worker launches, then run the queued launch.
+    h.runtime.store.set(KV.assignees.config, { ...roster, agents: [agent('default-worker')] })
+    await h.runtime.idle()
+    // The fallback left a durable trace: a note Input naming the removed agent, shown on the ticket and delivered to the worker.
+    const stored = h.runtime.store.tickets.get(ticket.id)!
+    expect(stored.inputs).toEqual([expect.objectContaining({ kind: 'note',
+      text: 'The roster agent `docs-scribe` this ticket was accepted for no longer exists, so the built-in worker runs instead.' })])
+  } finally { await h.stop() }
 })

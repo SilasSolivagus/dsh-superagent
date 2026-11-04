@@ -28,6 +28,24 @@ it('falls back to the single default agent when the stored configuration is abse
   expect(broken.error).toBeTruthy()
 })
 
+it('returns a copy of the default, so a caller cannot change what a later loadConfig() returns', () => {
+  const store = new Store(join(directory, 'orchestrator.sqlite'))
+  const first = loadConfig(store).config
+  first.enabled = true
+  first.agents[0]!.id = 'mutated'
+  first.agents[0]!.skills.push('visual')
+  // The default itself is untouched, and the next read of an absent configuration is its original value.
+  expect(DEFAULT_CONFIG.enabled).toBe(false)
+  expect(DEFAULT_CONFIG.agents[0]).toMatchObject({ id: 'default-worker', skills: ['*'] })
+  expect(loadConfig(store)).toEqual({ config: DEFAULT_CONFIG })
+  // The unreadable fallback is a copy too: editing it must not leak into its own next read.
+  store.set(KV.assignees.config, { version: 1, enabled: 'yes', agents: [] })
+  const broken = loadConfig(store)
+  broken.config.enabled = true
+  broken.config.agents[0]!.skills.push('visual')
+  expect(loadConfig(store).config).toEqual(DEFAULT_CONFIG)
+})
+
 it('records the configuration under its own key, never inside settings', () => {
   const store = new Store(join(directory, 'orchestrator.sqlite'))
   store.set(KV.assignees.config, config([agent('default-worker'), agent('ui', { skills: ['visual'] })], true))

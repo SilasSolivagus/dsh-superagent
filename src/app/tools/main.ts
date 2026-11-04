@@ -53,7 +53,7 @@ const RouteItemSchema = z.object({
   worktree_name: z.string().nullish().describe(`accept: ${WorktreeNameSchema.description ?? ''}`),
   acknowledgement: z.string().nullish().describe(`accept: one brief sentence of at most ${IM_WORDS} words naming the concrete change and intended result in the source language. It is posted as a reply to the original source on acceptance, so do not quote the source; quote an earlier proposal briefly only when the trigger merely confirms it and the sentence does not already state it. No generic I will handle it.`),
   note: z.string().nullish().describe(`accept and attach: ${RoutingNoteSchema.description ?? ''}`),
-  work_type: z.enum(WORK_TYPES).nullish().describe(`accept: the kind of change the original request actually needs, judged from the request itself rather than from the words the sender used. Give it on every accept.`),
+  work_type: z.enum(WORK_TYPES).nullish().describe(`accept: the kind of change the original request actually needs, judged from the request itself rather than from the words the sender used. One of: ${WORK_TYPES.join(', ')}. Give it on every accept.`),
   reason: z.string().nullish().describe('ignore and stop: why, at most 500 characters; an ignore needs it.'),
 }).strict()
 type RouteItem = z.infer<typeof RouteItemSchema>

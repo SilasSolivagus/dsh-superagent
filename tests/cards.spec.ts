@@ -171,6 +171,21 @@ it('shows a ticket card\'s state from a closed set: the open ticket\'s stage, th
   expect(ticketCard(ticket)).not.toHaveProperty('attention')
   expect(ticketCard({ ...ticket, attention: { id: 'q', question: 'Desktop too?' } })).toMatchObject({ attention: { question: 'Desktop too?' } })
 })
+it('keeps a ticket card\'s key set fixed, with no assignee of its own', () => {
+  // The card is a model-facing projection: an execution's directory and assignee stay behind the ticket's resources.
+  const execution = { name: 'ticket-1', directory: '/worktrees/ticket-1', assignment: 'Inspect the check.' }
+  const unassigned: Ticket = { ...ticket, execution }
+  const keys = ['ticket_id', 'title', 'state', 'strength', 'pr_number', 'preview', 'read']
+  expect(unassigned.execution?.directory).toBe('/worktrees/ticket-1')
+  expect(unassigned.execution).not.toHaveProperty('assignee')
+  expect(Object.keys(ticketCard(unassigned))).toEqual(keys)
+  expect(JSON.stringify(ticketCard(unassigned))).not.toContain('assignee')
+  // An execution may name the roster agent that runs the ticket, but the card's shape stays the same: giving the card an
+  // assignee field must be an explicit change to this expectation, not something a routing change lets happen silently.
+  const assigned: Ticket = { ...ticket, execution: { ...execution, assignee: 'docs-scribe' } }
+  expect(Object.keys(ticketCard(assigned))).toEqual(keys)
+  expect(JSON.stringify(ticketCard(assigned))).not.toContain('assignee')
+})
 it('shows a decision with snake_case keys and a reference to its details', () => {
   const decision: Decision = { id: 'd1', evalId: 'e1', threadKey: 'github:42', triggerIds: ['request-1'], policyVersion: 'v1', at: 'a', kind: 'accept', reason: [said('r')],
     strength: 'explicit', ticketId: 'ticket-1', audit: { matches: [] } }

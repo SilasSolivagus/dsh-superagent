@@ -25,13 +25,12 @@ Assignee routing decides which executor a Ticket should go to. Its configuration
   "version": 1,
   "enabled": false,
   "agents": [
-    { "id": "default-worker", "skills": ["*"], "scopes": ["*"], "concurrency": 2, "cost": "mid" },
-    { "id": "ui", "skills": ["visual", "copy"], "scopes": ["acme/widgets"], "concurrency": 1, "cost": "low" }
+    { "id": "default-worker", "preset": "dsh-superagent-worker", "model": null, "skills": ["*"], "scopes": ["*"], "concurrency": 2, "cost": "mid" }
   ]
 }
 ```
 
-`version` must be `1`. `enabled` is the master switch and defaults to `false`. This prototype implements only shadow mode: whether it is `false` or `true`, each explicit accept records what routing would choose and the Ticket is accepted exactly as before. A missing or invalid record falls back to the single wildcard `default-worker` above.
+`version` must be `1`. `enabled` is the master switch and defaults to `false`. The record above is the built-in default, so it can be stored unchanged; add an entry to `agents` for each further executor. This prototype implements only shadow mode: whether it is `false` or `true`, each explicit accept records what routing would choose and the Ticket is accepted exactly as before. A missing or invalid record falls back to the single wildcard `default-worker` above.
 
 Each agent names the work it can take:
 

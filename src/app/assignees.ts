@@ -47,8 +47,29 @@ export const DEFAULT_CONFIG: AssigneesConfig = {
 /** A fresh copy of the default, so a caller editing what it read cannot change later reads. */
 const defaultConfig = (): AssigneesConfig => structuredClone(DEFAULT_CONFIG)
 
-/** Why `suggest` did not pick a specialist; a fallback always names `default-worker`. */
+/**
+ * Why `suggest` did not pick a specialist. A fallback still names an agent that exists in the roster,
+ * chosen by `fallbackAgent`.
+ */
 export type Fallback = 'single' | 'noCapability' | 'lowConfidence' | 'handedBack'
+
+/** Why a fallback chose the agent it names, in the order the roster is searched. */
+type FallbackReason = 'default-worker' | 'first-wildcard' | 'first-agent'
+
+/**
+ * Choose the agent a fallback names from the roster itself. The id `default-worker` is only the first
+ * choice, never an assumption: a roster the user configured may not contain it, and a shadow record
+ * naming an absent agent would defer the mistake to launch time.
+ */
+function fallbackAgent(config: AssigneesConfig): { agent: Agent; reason: FallbackReason } {
+  const preferred = config.agents.find(agent => agent.id === 'default-worker')
+  if (preferred) return { agent: preferred, reason: 'default-worker' }
+  // A wildcard skill can take any work type, so it is the closest thing to the old default agent.
+  const wildcard = config.agents.find(agent => agent.skills.includes('*'))
+  if (wildcard) return { agent: wildcard, reason: 'first-wildcard' }
+  // The schema requires at least one agent, so a parsed configuration always has a first one.
+  return { agent: config.agents[0]!, reason: 'first-agent' }
+}
 
 /** What routing would do for one ticket, with the evidence that decided it. */
 export interface Suggestion {
@@ -123,7 +144,7 @@ const WEIGHTS = {
 } as const
 
 /**
- * Confidence floor for assigning a candidate instead of falling back to `default-worker`. A candidate
+ * Confidence floor for assigning a candidate instead of falling back. A candidate
  * that names the work type clears it on capability alone (3 points); a wildcard candidate starts at
  * 0.75 and needs at least 1.25 more from load, cost and history. Raising it makes routing more
  * conservative (above 3 it would also reject specialists); lowering it routes to weaker matches.
@@ -132,14 +153,17 @@ const MIN_SCORE = 2
 
 /**
  * Choose an executor for one work type: hard-filter on capability and free slots, then rank by capability
- * coverage, free capacity, cost and history. Anything unqualified falls back to `default-worker` rather than
- * failing, so a ticket never waits on a routing decision.
+ * coverage, free capacity, cost and history. Anything unqualified falls back to an agent that exists in
+ * the roster rather than failing, so a ticket never waits on a routing decision.
  * @param load - how many tickets each agent already holds, by agent id.
  * @param history - an optional success rate per agent for this work type; a value outside [0, 1] is clamped to that range.
  */
 export function suggest(workType: WorkType | null, config: AssigneesConfig, load: ReadonlyMap<string, number> = new Map(),
   repo: string | undefined = undefined, history: (agent: string) => number = () => 0): Suggestion {
-  const fallback = (kind: Fallback): Suggestion => ({ assignee: 'default-worker', score: 0, evidence: [], fallback: kind })
+  const fallback = (kind: Fallback): Suggestion => {
+    const { agent, reason } = fallbackAgent(config)
+    return { assignee: agent.id, score: 0, evidence: [`fallback:${reason}`, `agent:${agent.id}`], fallback: kind }
+  }
   // Without a work type nothing can be matched: record that, so the shadow run measures coverage.
   if (workType === null) return fallback('lowConfidence')
   const candidates = config.agents.filter(agent => covers(agent, workType, repo) && (load.get(agent.id) ?? 0) < agent.concurrency)

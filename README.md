@@ -96,6 +96,7 @@ Read the numbered documents in order; each builds only on the ones before it.
 - [005 Panel](docs/005-panel.md)
 - [006 Deployment](docs/006-deployment.md): manual setup, configuration, upgrades and troubleshooting
 - [007 Architecture](docs/007-architecture.md)
+- [009 Subagents and presets](docs/009-subagent-presets.md): how a subagent's preset is chosen, and why a pinned one defeats a restricted worker
 - [008 Cookbook](docs/008-cookbook.md): adding a Source
 
 ## Development

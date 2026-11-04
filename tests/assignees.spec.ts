@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest'
 import { Store } from '../src/app/store.ts'
 import { KV } from '../src/kv.ts'
 import { DEFAULT_CONFIG, loadConfig, readShadow, recordShadow, suggest, type AssigneesConfig } from '../src/app/assignees.ts'
+import { agentAllows } from '../src/executor/dsh.ts'
 import { feishu, startRuntime } from './fixtures/host.ts'
 
 let directory: string
@@ -270,4 +271,13 @@ it('names the picked agent on the ticket when routing is enabled, and leaves it 
     const plain = h.runtime.store.tickets.open().find(ticket => ticket.title === 'README 再补一句')!
     expect(plain.execution?.assignee).toBeUndefined()
   } finally { await h.stop() }
+})
+
+it('lets an agent start only as many tickets as its roster entry allows', () => {
+  const roster = { concurrency: 2 }
+  expect(agentAllows(undefined, 5)).toBe(true)      // no roster entry: only the global maximum applies
+  expect(agentAllows(roster, 0)).toBe(true)
+  expect(agentAllows(roster, 1)).toBe(true)
+  expect(agentAllows(roster, 2)).toBe(false)        // its own slot is full, so the launch waits
+  expect(agentAllows(roster, 3)).toBe(false)
 })

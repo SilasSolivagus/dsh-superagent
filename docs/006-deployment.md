@@ -230,6 +230,16 @@ A file in `worker-bin` or `worker-gitconfig` that dsh-superagent did not write s
 
 From an allowed GitHub account, open an Issue or post a comment containing `@<agent login> <request>`. Within a polling interval (one minute by default), Overview should show a Ticket. The agent acknowledges the request, works in its own Session and directory, and delivers in the original conversation. For Feishu, mention the bot in a configured chat.
 
+## CI gates
+
+`.github/workflows/check.yml` runs on every push to `main` and every pull request. One job, named `typecheck, tests, build`, installs with the frozen lockfile on Node.js 22 and pnpm 11.7.0, then runs `pnpm check`: `pnpm typecheck` (`tsc --noEmit`), `pnpm test` (`vitest run`) and `pnpm build` (`tsdown`), in that order. A newer run on the same branch cancels the older one.
+
+`main` requires that check to pass and the branch to be up to date with `main` before a merge. The rule applies to administrators too, and force pushes and deletions are refused.
+
+A worker's pull request therefore merges only when the check is green on a branch that is current with `main`. A worker cannot push to `main` directly: it pushes a branch and opens a pull request, where the same check runs on each update.
+
+To read a failure, run `gh pr checks <n>`: the failing entry links to its run. Then run `gh run view <run-id> --log-failed` to print only the failed steps' logs.
+
 ## Upgrade
 
 1. Wait until no Executor is in the middle of a turn.

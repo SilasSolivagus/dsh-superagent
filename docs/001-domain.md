@@ -1,6 +1,6 @@
 # 001 Domain model
 
-This document names the concepts of dsh-superagent and the rules each one keeps. The code, the tools the agents call, the panel and the other documents use these terms and no others. Following [000 Philosophy](000-philosophy.md), the model holds only concepts the work needs, and a business need becomes an attribute of one of them.
+This document names the concepts of dsh-superagent and the rules each one keeps. The code, the tools the agents call, the panel and the other documents use these terms and no others, except the code and prompt identifiers that [Names by context](#names-by-context) maps. Following [000 Philosophy](000-philosophy.md), the model holds only concepts the work needs, and a business need becomes an attribute of one of them.
 
 ## Flow
 
@@ -71,6 +71,18 @@ The concepts above and their rules are reusable. The Source implementations, the
 | Policy | Assessment rules, and each Source's allowed list, its sync, its bot list and its admission table |
 | Executor | A DSH Executor Session and a directory per Ticket, in an execution environment whose variables the Executor and the Sources register |
 | Channel | Feishu topic replies, GitHub comments and review thread replies |
+
+## Names by context
+
+The panel and the documents name a role; the code and the prompts identify the same role with an identifier. Use the panel's name in prose and the identifier only when naming code.
+
+| Concept | Panel and documents | Code and prompts |
+| --- | --- | --- |
+| Main Session | Main Session · 主 Session | `orchestrator` |
+| Executor Session | Executor Session · 执行器 Session | `worker`: Session id `worker-<ticket id>`, preset `dsh-superagent-worker`, `WorkerSlots`, `WORKER_PRESET`, `workerSessionId` |
+| Executor | Executor · 执行器 | `DshExecutor` in `src/executor/`; health entry `worker` |
+
+Chinese prose uses 执行器 and 执行器 Session, never 工人; `worker` is an identifier, not a synonym for the role.
 
 ## Glossary
 

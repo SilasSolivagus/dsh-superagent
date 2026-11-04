@@ -89,6 +89,17 @@ it('records what routing would have decided and leaves the ticket alone', () => 
   expect(store.tickets.list()).toEqual([])
 })
 
+it('records enabled=true and still writes the suggestion', () => {
+  const store = new Store(join(directory, 'orchestrator.sqlite'))
+  store.set(KV.assignees.config, config([agent('default-worker'), agent('ui', { skills: ['visual'] })], true))
+  const record = recordShadow(store, { decisionId: 'decision-enabled', ticketId: 'ticket-2', workType: 'visual', now: new Date('2026-11-04T00:00:00.000Z') })
+  expect(record.enabled).toBe(true)
+  // Turning routing on still records the suggestion, so an operator can compare it with the real assignment.
+  expect(record.suggestion.assignee).toBe('ui')
+  // Both fields survive the round trip through the store.
+  expect(readShadow(store, 'decision-enabled')).toEqual(record)
+})
+
 it('records the work type through the route tool and leaves the ticket unchanged', async () => {
   const h = await startRuntime()
   try {
